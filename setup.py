@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 #
-# csv2odf 2.03
+# csv2odf 2.04
 # Copyright (C) 2015 Larry Jordan
 # <http://csv2odf.sourceforge.net>
 #
@@ -24,7 +24,7 @@
 import distutils.core
 
 distutils.core.setup(name='csv2odf',
-      version='2.03',
+      version='2.04',
       description='Convert csv files to open document format',
       url = 'http://csv2odf.sourceforge.net',
       license='GNU GPL-3',

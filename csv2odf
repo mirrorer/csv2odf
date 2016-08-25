@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# csv2odf  v2.03
+# csv2odf  v2.04
 # Copyright (C) 2015 Larry Jordan <w322 at users.sourceforge.net>
 
 '''Convert a csv file to odf, ods, html, xlsx,
@@ -64,7 +64,7 @@ import cgi
 class ApplicationController:
     '''This class is responsible for reading user options and communicating options to the program.'''
 
-    VERSION = "2.03"
+    VERSION = "2.04"
 
     # default properties
     quiet = 0             # show no output
@@ -1765,14 +1765,14 @@ class DocumentProcessor:
             # count the table and row matches
             if tag.group(self.ROWSTART):
                 self.position.next_row()
+                max_match = tag.end()
                 if self.position.in_row_depth_1():
-                    row_start = tag.start(self.ROWSTART)
-                max_match = tag.end(self.ROWSTART)
+                    row_start = tag.start()
                 if row_start > process_point:
                     self.write_output(chunk[process_point:row_start])
                     process_point = row_start
             elif tag.group(self.ROWEND):
-                row_end = tag.end(self.ROWEND)
+                row_end = tag.end()
                 max_match = row_end
                 if self.position.in_row_depth_1():
                     self.row_string = ''.join([self.row_string, chunk[row_start:row_end]])
@@ -1784,7 +1784,7 @@ class DocumentProcessor:
                 self.position.end_row()
             elif tag.group(self.TABLESTART):
                 self.position.next_table()
-                max_match = tag.end(self.TABLESTART)
+                max_match = tag.end()
                 if self.position.table_depth_1():
                     if self.table_name_attrib_name:
                         id_match = re.search(self.table_name_attrib_name+"=[\'\"]([a-zA-Z_.-]+)[\'\"]",
@@ -1795,7 +1795,7 @@ class DocumentProcessor:
                                 self.position.set_target_table_name(id_match.group(1))
                     if self.app.doctype == 'xlsx':
                         if self.position.in_target_table() and tag.group() == '<sheetData/>':  # The table is empty, generate an empty row for inserting data
-                            self.write_output(''.join([chunk[process_point:tag.start(self.TABLESTART)],
+                            self.write_output(''.join([chunk[process_point:tag.start()],
                                                        '<sheetData>']))
                             if self.app.header_from_csv:
                                 self.row_string = self.generate_row_xlsx()
@@ -1821,7 +1821,7 @@ class DocumentProcessor:
                             self.row_process(self.model.row_prototype())
                             self.position.generate_row()
                 self.position.end_table()
-                max_match = tag.end(self.TABLEEND)
+                max_match = tag.end()
                 if (self.app.doctype in ['odt', 'html-table', 'html-div', 'docx']
                     and self.position.after_insert_row()):
                     self.flush = True  # the doc types do not need any more row processing
@@ -1842,7 +1842,7 @@ class DocumentProcessor:
             self.write_output(chunk[process_point:])
             process_point = len(chunk)
         elif self.position.in_row():
-            if row_start <= overlap_point:
+            if row_start < overlap_point:
                 self.row_string = ''.join([self.row_string, chunk[row_start:overlap_point]])
                 process_point = overlap_point
             else:
