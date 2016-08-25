@@ -1,3 +1,11 @@
+csv2odf (2.02) unstable; urgency=low
+
+  * Fixed pipes in Windows when using python 2.7.
+  * Added ability to add data to empty sheets in xlsx.
+  * Fixed -o option to leave empty order positions unchanged.
+
+ -- Larry Jordan <w322@users.sourceforge.net>  Mon, 13 Oct 2014 18:24:16 -0400
+
 csv2odf (2.01) unstable; urgency=low
 
   * Changed temporary file to decrease memory use during final save.

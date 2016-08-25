@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# csv2odf  v2.01
+# csv2odf  v2.02
 # Copyright (C) 2014 Larry Jordan <w322 at users.sourceforge.net>
 
 '''Convert a csv file to odf, ods, html, xlsx,
@@ -60,7 +60,7 @@ import cgi
 
 class ApplicationController:
 
-    VERSION = "2.01"
+    VERSION = "2.02"
 
     # default properties
     quiet = 0             # show no output
@@ -762,7 +762,7 @@ class CSVMergeProcessor:
         output_row = self.template_elem.cloneNode(True)
         while output_row.childNodes.length > 0:
             output_row.removeChild(output_row.lastChild)
-        i = 0
+        data_column_index = 0
         if self.app.doctype == 'xlsx':
             if not output_row.hasAttribute('r'):                                                                      
                 ref_node = self.template_document.createAttribute('r')
@@ -774,50 +774,52 @@ class CSVMergeProcessor:
                 if new_node.hasAttribute('table:number-columns-repeated'): # it's a compressed cell, expand it
                     number_columns_repeated = int(new_node.getAttribute('table:number-columns-repeated'))
                     new_node.removeAttribute('table:number-columns-repeated')
-                    data_item = self.data_item_from_index(data_row, i)
-                    merged_cell = self.merge_cell(new_node, data_item, sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, in_target_row)
+                    data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
+                    merged_cell = self.merge_cell(new_node, data_item, sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, in_target_row, do_inject_value)
                     output_row.appendChild(merged_cell)
-                    i += 1
+                    data_column_index += 1
                     for j in range(number_columns_repeated - 1):
                         additional_node = new_node.cloneNode(True)
-                        data_item = self.data_item_from_index(data_row, i)
-                        merged_cell = self.merge_cell(additional_node, data_item, sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, in_target_row)
+                        data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
+                        merged_cell = self.merge_cell(additional_node, data_item, sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, in_target_row, do_inject_value)
                         output_row.appendChild(merged_cell)
-                        i += 1
+                        data_column_index += 1
                 else:
-                    data_item = self.data_item_from_index(data_row, i)
-                    merged_cell = self.merge_cell(new_node, data_item, sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, in_target_row)
+                    data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
+                    merged_cell = self.merge_cell(new_node, data_item, sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, in_target_row, do_inject_value)
                     output_row.appendChild(merged_cell)
-                    i += 1
+                    data_column_index += 1
             else:
-                while self.app.doctype == 'ods' and i < len(data_row): # there is more data than template cells, append unformatted cells
-                    data_item = self.data_item_from_index(data_row, i)
-                    new_row = self.create_cell_node(data_item, i+1, sheet_row_number, self.template_document, in_table_1, in_target_table)
+                while self.app.doctype == 'ods' and data_column_index < len(data_row): # there is more data than template cells, append unformatted cells
+                    data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
+                    new_row = self.create_cell_node(data_item, data_column_index+1, sheet_row_number, self.template_document, in_table_1, in_target_table)
                     output_row.appendChild(new_row)
-                    i += 1
+                    data_column_index += 1
                 output_row.appendChild(new_node) # this is where we reinsert the empty placeholder node
-        while i < len(data_row): # there is more data than template cells, append unformatted cells
-            data_item = self.data_item_from_index(data_row, i)
-            output_row.appendChild(self.create_cell_node(data_item, i+1, sheet_row_number, self.template_document, in_table_1, in_target_table))
-            i += 1
+        while data_column_index < len(data_row): # there is more data than template cells, append unformatted cells
+            data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
+            output_row.appendChild(self.create_cell_node(data_item, data_column_index+1, sheet_row_number, self.template_document, in_table_1, in_target_table))
+            data_column_index += 1
         return output_row
 
-    def data_item_from_index(self, data_row, i, default=""):
+    def data_item_from_index(self, data_row, i):
         '''Given an index number (i), select a data item from a data row.
            But the one selected may be based on a sequence provided by the user (self.app.order).'''
+        do_inject_value = True
         if i < len(self.app.order):
             data_column_index = self.app.order[i]
         else:  # i is beyond the length of self.app.order
             data_column_index = i
         if data_column_index is not None and data_column_index < len(data_row):
             data_item = data_row[data_column_index]
-        else: # data_column_index is not within the length of data_row
-            data_item = default
+        else:
+            data_item = ""
+            do_inject_value = False  # there is no order value, retain the current cell value
         if sys.version_info[0] == 2:
             data_item = data_item.decode('UTF-8')
-        return data_item
+        return data_item, do_inject_value
 
-    def merge_cell(self, template_cell, data_item, sheet_row_number, formula_offset, sheet, in_table_1, in_target_table, in_target_row=False):
+    def merge_cell(self, template_cell, data_item, sheet_row_number, formula_offset, sheet, in_table_1, in_target_table, in_target_row, do_inject_value):
         '''Inputs:
             template_cell     a single cell used as the template, formatting is copied
             data_item         a string that will replace the text payload in the template_cell
@@ -835,51 +837,55 @@ class CSVMergeProcessor:
                 output_cell.setAttribute(self.date_attrib_name, self.format_date(data_item))
                 output_cell.firstChild.firstChild.data = ""  # for a date, leave the cell text empty
             self.formula_adjuster.adjust_cell(output_cell, in_table_1, in_target_table, in_target_row, formula_offset)
-            if output_cell.hasAttribute(self.value_attrib_name):
-                output_cell.setAttribute(self.value_attrib_name, data_item)
-            text_line_list = data_item.splitlines()
-            paragraph = output_cell.firstChild
-            paragraph_template = paragraph.cloneNode(True)
-            if not text_line_list: text_line_list = [""]
-            paragraph.firstChild.data = text_line_list[0]
-            for text_line in text_line_list[1:]:
-                last_paragraph = paragraph_template.cloneNode(True)
-                last_paragraph.firstChild.data = text_line  # put the value in the cell text
-                output_cell.appendChild(last_paragraph)
+            if do_inject_value:
+                if output_cell.hasAttribute(self.value_attrib_name):
+                    output_cell.setAttribute(self.value_attrib_name, data_item)
+                text_line_list = data_item.splitlines()
+                paragraph = output_cell.firstChild
+                paragraph_template = paragraph.cloneNode(True)
+                if not text_line_list: text_line_list = [""]
+                paragraph.firstChild.data = text_line_list[0]
+                for text_line in text_line_list[1:]:
+                    last_paragraph = paragraph_template.cloneNode(True)
+                    last_paragraph.firstChild.data = text_line  # put the value in the cell text
+                    output_cell.appendChild(last_paragraph)
         elif self.app.doctype == 'xlsx':
             self.formula_adjuster.adjust_cell(output_cell, in_table_1, in_target_table, in_target_row, formula_offset)
-            value_list = output_cell.getElementsByTagName('v')
-            if value_list:
-                cell_value = value_list[0]
-                if output_cell.hasAttribute('t') and output_cell.getAttribute('t') == 's':  # it's a cell with a string
-                    index = cell_value.firstChild.data
-                    if self.string_file.is_a_date_cell(index):
-                        cell_value.firstChild.data = self.format_date(data_item)
-                        output_cell.removeAttribute('t')
+            if do_inject_value:
+                value_list = output_cell.getElementsByTagName('v')
+                if value_list:
+                    cell_value = value_list[0]
+                    if output_cell.hasAttribute('t') and output_cell.getAttribute('t') == 's':  # it's a cell with a string
+                        index = cell_value.firstChild.data
+                        if self.string_file.is_a_date_cell(index):
+                            cell_value.firstChild.data = self.format_date(data_item)
+                            output_cell.removeAttribute('t')
+                        else:
+                            index = self.string_file.append(data_item)
+                            cell_value.firstChild.data = index
                     else:
-                        index = self.string_file.append(data_item)
-                        cell_value.firstChild.data = index
-                else:
-                    cell_value.firstChild.data = data_item
+                        cell_value.firstChild.data = data_item
         elif self.app.doctype in ['html-table', 'html-div']:
-            text_line_list = data_item.splitlines()
-            if not text_line_list: text_line_list = [""]
-            output_cell.firstChild.data = text_line_list[0]
-            for text_line in text_line_list[1:]:
-                output_cell.appendChild(sheet.createElement("br"))
-                output_cell.appendChild(sheet.createTextNode(text_line))
-        elif self.app.doctype == 'docx':
-            text_line_list = data_item.splitlines()
-            if not text_line_list: text_line_list = [""]
-            paragraph = output_cell.getElementsByTagName('w:p')[0]
-            text_node = paragraph.getElementsByTagName('w:t')[0]
-            paragraph_template = paragraph.cloneNode(True)
-            text_node.firstChild.data = text_line_list[0]
-            for text_line in text_line_list[1:]:
-                last_paragraph = paragraph_template.cloneNode(True)
-                text_node = last_paragraph.getElementsByTagName('w:t')[0]
-                text_node.firstChild.data = text_line
-                output_cell.appendChild(last_paragraph)
+            if do_inject_value:
+                text_line_list = data_item.splitlines()
+                if not text_line_list: text_line_list = [""]
+                output_cell.firstChild.data = text_line_list[0]
+                for text_line in text_line_list[1:]:
+                    output_cell.appendChild(sheet.createElement("br"))
+                    output_cell.appendChild(sheet.createTextNode(text_line))
+        elif self.app.doctype == 'docx': 
+            if do_inject_value:
+                text_line_list = data_item.splitlines()
+                if not text_line_list: text_line_list = [""]
+                paragraph = output_cell.getElementsByTagName('w:p')[0]
+                text_node = paragraph.getElementsByTagName('w:t')[0]
+                paragraph_template = paragraph.cloneNode(True)
+                text_node.firstChild.data = text_line_list[0]
+                for text_line in text_line_list[1:]:
+                    last_paragraph = paragraph_template.cloneNode(True)
+                    text_node = last_paragraph.getElementsByTagName('w:t')[0]
+                    text_node.firstChild.data = text_line
+                    output_cell.appendChild(last_paragraph)
         else:
             self.app.stop("Error: document type '"+self.app.doctype+"' is not recognized in merge_cell.", 1)
         if self.app.debug:
@@ -912,14 +918,14 @@ class CSVMergeProcessor:
                 if new_node.hasAttribute('table:number-columns-repeated'): # it's a compressed cell, expand it
                     number_columns_repeated = int(new_node.getAttribute('table:number-columns-repeated'))
                     new_node.removeAttribute('table:number-columns-repeated')
-                    merged_cell = self.merge_cell(new_node, "", sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table)
+                    merged_cell = self.merge_cell(new_node, "", sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, False, False)
                     output_row.appendChild(merged_cell)
                     for j in range(number_columns_repeated - 1):
                         additional_node = new_node.cloneNode(True)
-                        merged_cell = self.merge_cell(additional_node, "", sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table)
+                        merged_cell = self.merge_cell(additional_node, "", sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, False, False)
                         output_row.appendChild(merged_cell)
                 else:
-                    merged_cell = self.merge_cell(new_node, "", sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table)
+                    merged_cell = self.merge_cell(new_node, "", sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, False, False)
                     output_row.appendChild(merged_cell)
             else:
                 output_row.appendChild(new_node) # this is where we reinsert the empty placeholder node
@@ -950,7 +956,7 @@ class CSVMergeProcessor:
                 new_cell_node.appendChild(new_text_node)
             new_cell_node.setAttribute('t', 's')
             new_cell_node.setAttribute('r', self.column_letter(column_number)+str(row_number))
-            new_cell_node = self.merge_cell(new_cell_node, data_string, row_number, 0, content, in_table_1, in_target_table)
+            new_cell_node = self.merge_cell(new_cell_node, data_string, row_number, 0, content, in_table_1, in_target_table, False, True)
         else:
             if self.model.textnode_regex() is None:
                 new_cell_node.appendChild(content.createTextNode(data_string))
@@ -1396,6 +1402,26 @@ class DocumentProcessor:
                     # check if this is target table
                     if self.app.doctype == 'xlsx':
                         self.in_target_table = self.in_target_file
+                        if self.in_target_table and tag.group() == '<sheetData/>':  # The table is empty, generate an empty row for inserting data
+                            self.write_output(''.join([chunk[process_point:tag.start(self.TABLESTART)],
+                                                       '<sheetData>']))
+                            sheet_dom = xml.dom.minidom.Document()
+                            row_dom = sheet_dom.createElement("row")
+                            sheet_dom.appendChild(row_dom)
+                            row_dom.setAttributeNode(sheet_dom.createAttribute('r'))
+                            row_dom.setAttribute('r', '2')
+                            cell_dom = sheet_dom.createElement("c")
+                            row_dom.appendChild(cell_dom)
+                            cell_dom.setAttributeNode(sheet_dom.createAttribute('r'))
+                            cell_dom.setAttribute('r', 'A2')
+                            self.row_string = row_dom.toxml()
+                            self.row_num = 2
+                            self.row_num = self.row_process(self.row_string, self.row_num)  # write to output, replicate row with merged data if target, row_num will be increased by no. or rows added
+                            self.write_output('</sheetData>')
+                            process_point = max_match
+                            self.in_row = False
+                            self.row_depth = 0
+                            self.row_string = ""
                     else:
                         self.in_target_table = self.in_target_file and (
                             (self.target_table_num is not None and self.table_num == self.target_table_num) 
@@ -1526,6 +1552,7 @@ class DocumentProcessor:
                         if self.app.end and self.data_row_index >= self.app.end:
                             break
                     sheet_row_num -= 1  # subtract 1 because the 1st row merged already existed
+                    self.outgoing_data_row_index -= 1
                 else:
                     row_dom = self.csv_merge_processor.null_row(sheet_row_num, self.data_row_index)
                     self.csv_merge_processor.adjust_row(row_dom, self.in_table_1, self.in_target_table, True)
@@ -1849,6 +1876,12 @@ class TemporaryFile:
         else:
             zipfile.write(self.name, inner_filename)
     
+    def type(self):
+        if self.is_in_ram:
+            return type(self.ram_file)
+        else:
+            return type(self.disk_file)
+    
     def close(self):
         if self.is_in_ram:
             self.ram_file.close()
@@ -2024,6 +2057,9 @@ class DocumentArchive:
             if out_file_name == "stdout":
                 buffer.seek(0)
                 if sys.version_info[0] == 2:
+                    if sys.platform == "win32":  # win + python 2.x defaults to string mode and mangles binary
+                        import msvcrt
+                        msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
                     sys.stdout.write(buffer.read())
                 else:
                     try:
