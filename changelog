@@ -1,3 +1,11 @@
+csv2odf (1.02); urgency=low
+
+   * csv2odf is now compatible with Python 3, requires Python 2.6 or greater
+   * csv file is now optional when not merging data
+   * Date styles are now preserved
+
+   -- Larry Jordan  <w322 at users.souceforge.net>  2009-12-26
+
 csv2odf (1.01); urgency=low
 
    * Minor code cleanup
