@@ -1,3 +1,10 @@
+csv2odf (1.03); urgency=low
+
+   * rewritten to use python xml.dom module, simplifying the code
+   * options can now be included in the template file
+
+   -- Larry Jordan  <w322 at users.souceforge.net>  2010-04-12
+
 csv2odf (1.02); urgency=low
 
    * csv2odf is now compatible with Python 3, requires Python 2.6 or greater

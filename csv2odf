@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# csv2odf  v1.02
+# csv2odf  v1.03
 # Copyright (C) 2009 Larry Jordan <w322 at users.sourceforge.net>
 #
 # csv2odf is free software: you can redistribute it and/or modify
@@ -19,23 +19,21 @@
 #
 
 # Objects:
-# Instance	Type
-# --------	-----------------------
-# app		application_initializer
-# template	user_template_file
-# data		incoming_data_source
-# output	merged_data_document
+# Instance		Type
+# --------		-----------------------
+# app			application_initializer
+# document		document_processor
+# data			incoming_data_source
 
-# For python 2.6 print function compatibility
-from __future__ import print_function
+from __future__ import print_function  # For python 2.6 print function compatibility
 
-import getopt, sys, os
+import getopt, shlex, sys, os
 
 def _(string=""):	#support for localization, not yet implemented
 	return string
 
 class application_initializer:
-	
+
 	# properties
 	quiet = 0
 	verbose = 0
@@ -45,18 +43,15 @@ class application_initializer:
 	start = 0
 	end = 0
 	header_from_csv = 0
-	debug = 0
 	colSkips = 0
 	rowSkips = 0
-	firstDataRow = 2
 	delimiter = ','
 	dateformat = ""
 	order = []
-	template_file = ""
+	document_file = ""
 	csv_file = ""
 	out_file = ""
-	encoding = ""
-	
+
 	def help(self):
 		print(_("USAGE: csv2odf [OPTION] CSV TEMPLATE OUTPUT"))
 		print()
@@ -92,6 +87,11 @@ class application_initializer:
 		print(_("ated by using +n or -n, for example  [date-1]  would  insert  the  date"))
 		print(_("before today."))
 		print()
+		print(_("The  options  may  be  placed  in  the  template file.  To do this, put"))
+		print(_('"csv2odf:" (without qoutes) followed by the options in the  first  cell'))
+		print(_("(cell  A1).   Note  the  first  row  will  be  deleted when it contains"))
+		print(_("options."))
+		print()
 		print(_("OPTIONS"))
 		print(_("-h     displays help information"))
 		print(_("-v     verbose mode"))
@@ -116,7 +116,13 @@ class application_initializer:
 		print(_("-x     create an xml output file instead of odf"))
 		print(_("-n     do not  merge the  data into output, "))
 		print(_("          use with -x to extract template xml codes"))
-	
+		print(_("--input=<file>"))
+		print(_("       specify the csv data file location"))
+		print(_("--template=<file>"))
+		print(_("       specify the tempate file location"))
+		print(_("--output=<file>"))
+		print(_("       specify the output file location"))
+
 	def datehelp(self):
 		print(_("These codes may be used with the -d option."))
 		print(_("%a     Locale's abbreviated weekday name."))
@@ -145,12 +151,12 @@ class application_initializer:
 		print(_("%Y     Year with century as a decimal number."))
 		print(_("%Z     Time zone name (no characters if no time zone exists)."))
 		print(_('%%     A literal "%" character.'))
-	
+
 	def stop(self, message="", errnum=0):
 		'''Terminate the program with a message.'''
 		print(message)
 		sys.exit(errnum)
-	 
+
 	def extension(self, string):
 		'''Return the file type part of the file name.'''
 		dot = string.rfind(".")
@@ -158,7 +164,7 @@ class application_initializer:
 			return string[dot+1:]
 		else:
 			return ""
-	
+
 	def int_minus_1(self, string):
 		'''Converts a string to an integer and subtracts 1. '''
 		if string:
@@ -172,13 +178,28 @@ class application_initializer:
 				sys.exit(1)
 			return n - 1
 		else:
-			# -1 is a flag indicating no value was passed
-			return -1
-	
+			return None
+
 	def get_args(self):
 		'''get command line arguments'''
+		arguments = sys.argv[1:]
+		if arguments:
+			self.parse_args(arguments)
+		else:  # no arguments were provided, show help
+			self.help()
+			sys.exit(0)
+
+	def parse_args(self, arguments):
+		'''parse arguments'''
+		EN_DASH = '\xe2\x80\x93'
+		if type(arguments) is str:  # if arguments is a string, split it into a list.
+			arguments = arguments.replace(EN_DASH, '--')  # openoffice may sometimes replace a double-dash with an en-dash (unicode 2013), change it to double-dash.
+			arguments = shlex.split(arguments)
+		elif sys.version_info[0] == 2 and type(arguments) is unicode:  # if arguments is a unicode string, split it into a list.
+			arguments = arguments.replace(EN_DASH.decode('utf-8'), '--').encode()  # openoffice may sometimes replace a double-dash with an en-dash (unicode 2013), change it to double-dash.
+			arguments = shlex.split(arguments)
 		try:
-			optionlist, argumentlist = getopt.gnu_getopt(sys.argv[1:], "hHqvxnzs:e:c:Dd:S:o:")
+			optionlist, argumentlist = getopt.gnu_getopt(arguments, "hHqvxnzs:e:c:Dd:S:o:", ["input=", "template=", "output="])
 		except getopt.GetoptError:
 			self.help()
 			sys.exit(1)
@@ -193,9 +214,9 @@ class application_initializer:
 			elif o == "-o":
 				self.order = list(map( self.int_minus_1, a.split(",") ))
 				for i in range(len(self.order)):
-					if self.order[i] < 0: 
+					if self.order[i] == None:
 						self.colSkips += 1
-			elif o == "-D": 
+			elif o == "-D":
 				self.datehelp()
 				sys.exit(0)
 			elif o == "-H": self.header_from_csv = 1
@@ -214,7 +235,13 @@ class application_initializer:
 					self.end = int(a)
 				except ValueError:
 					self.stop(_("Error: ")+a+_(" does not look like a number"), 1)
-			elif o == "-z": 
+			elif o == "--input":
+				self.csv_file = a
+			elif o == "--template":
+				self.document_file = a
+			elif o == "--output":
+				self.out_file = a
+			elif o == "-z":
 				self.debug = 1
 				self.xml = 1
 				self.quiet = 1
@@ -226,18 +253,15 @@ class application_initializer:
 				print()
 				print(_("Warning: when help is displayed, no files are processsed"))
 			sys.exit(0)
-		if len(argumentlist) < 2:
-			self.help()
-			sys.exit(0)
 		#parse and validate arguments
 		for argument in argumentlist:
 			if self.extension(argument) in ('ods', 'odt'):
-				if not self.template_file: 
-					self.template_file = argument
+				if not self.document_file:
+					self.document_file = argument
 				elif not self.out_file:
 					self.out_file = argument
-				else:
-					self.stop(_("Error: expected two files of ods/odt type, got more than two"), 1)
+				#else:
+				#	self.stop(_("Error: expected two files of ods/odt type, got more than two"), 1)
 			elif self.extension(argument) == 'csv':
 				if not self.csv_file:
 					self.csv_file = argument
@@ -248,191 +272,201 @@ class application_initializer:
 					self.out_file = argument
 					self.xml = 1
 					if self.verbose: print(_("Producing xml output file"))
-			elif argument == argumentlist[2] and self.template_file and self.csv_file and not self.out_file:
+			elif argument == argumentlist[2] and self.document_file and self.csv_file and not self.out_file:
 				#out_file has not been identified but both other files have, just use the 3rd argument
 				self.out_file = argument
-		if not self.template_file: self.stop(_("Error: could not identify the template file in the given arguments."), 1)
+		if not self.document_file: self.stop(_("Error: could not identify the template file in the given arguments."), 1)
+
+	def test_args(self):
 		if not self.out_file: self.stop(_("Error: could not identify the output file in the given arguments."), 1)
 		if not self.csv_file:
 			self.nodata = 1
 			if not self.quiet: print(_("Warning: there was no csv file specified, output will have no data added."))
-		if not self.extension(self.template_file) == self.extension(self.out_file) and not (self.quiet or self.xml): 
+		if not self.extension(self.document_file) == self.extension(self.out_file) and not (self.quiet or self.xml):
 			print(_("Warning: the template and output files should be of the same type."))
-		if not os.path.exists(self.template_file): self.stop(_("Error: file was not found: ")+self.template_file, 1)
+		if not os.path.exists(self.document_file): self.stop(_("Error: file was not found: ")+self.document_file, 1)
 		if (not self.nodata) and (not os.path.exists(self.csv_file)): self.stop(_("Error: file was not found: ")+self.csv_file, 1)
-		
+
 	def __init__(self):
 		self.get_args()
 
-class user_template_file:
-	
-	import zipfile, time
-	
+	# end class application_initializer
+
+class document_processor:
+
+	import zipfile, time, re
+	import xml.dom.minidom
+
 	#properties
-	filename = ""
-	buffer = ""
-	fileheader = ""
-	header_rowstart = ""
-	header_cellstart = []
-	header_data = []
-	header_cellend = []
-	header_rowend = ""
-	rowstart = ""
-	cellstart = []
-	cellend = []
-	rowend = ""
-	filefooter = ""
-	pattern = ""
-	'''
-	A pattern is a dictionary of element names that returns a list of pattern elements:
-		1. start - the beginning of a pattern
-		2. end - the end of the pattern
-		3. too far - just beyond the end of the pattern
-		4. (optional) replacement pattern
-	'''
-	odf_pattern = {'fileheader': ['<?xml', '', '<table:table-row'],
-		'fileheader_tagged': ['<?xml', '', '<table:table-header-rows>'],
-		'header_tag': ['<table:table-header-rows>', '<table:table-row'],
-		'header_rowstart': ['<table:table-row', '', '<table:table-cell'],
-		'header_rowstart_tagged': ['<table:table-header-rows', '<table:table-row*>', ''],
-		'header_cellstart': ['<table:table-cell', '<text:p*>', '</table:table-row>'],
-		'header_data': ['', '', '</text:p>'],
-		'header_cellend': ['', '</table:table-cell>', '</table:table-row>', '</text:p></table:table-cell>'],
-		'header_rowend': ['', '</table:table-row>', ''],
-		'header_rowend_tagged': ['</table:table-row>', '</table:table-header-rows>', ''],
-		'rowstart': ['<table:table-row', '>', ''],
-		'cellstart': ['<table:table-cell', '<text:p*>', '</table:table-row>'],
-		'cellend': ['', '</table:table-cell>', '</table:table-row>', '</text:p></table:table-cell>'],
-		'rowend': ['', '', '', '</table:table-row>'],
-		'filefooter': ['</table:table>', '</*document-content>', ''] }
-	
-	# app variables used:
-	# app.rowSkips
-	# app.verbose
-	
+	filename = ""  # string containing the source filename
+	content = ""  # the xml document object model
+	initial_offset = 0
+
+	def __init__(self, filename):
+		self.filename = filename
+		self.read_odf()
+
 	def read_odf(self):
-		'''Read an odf file (either odt or ods) and return the file split into parts'''
-		templatefile = self.zipfile.ZipFile(self.filename,'r')
-		python_version = sys.version_info
-		if python_version[0] >= 3:
-			self.buffer = templatefile.read("content.xml").decode("UTF-8")
-		elif python_version[0] == 2 and python_version[1] >= 6:
-			self.buffer = templatefile.read("content.xml")
+		'''Read an odf file (either odt or ods) and parse content'''
+		documentfile = self.zipfile.ZipFile(self.filename,'r')
+		if sys.version_info[0] >= 3:
+			self.content = self.xml.dom.minidom.parseString(documentfile.read("content.xml").decode("UTF-8"))
+		elif sys.version_info[0] == 2 and sys.version_info[1] >= 6:
+			self.content = self.xml.dom.minidom.parseString(documentfile.read("content.xml"))
 		else:
-			app.stop(_("Error: Your Python version is too old, this program requires version 2.6 or greater"), 1)
-		templatefile.close()
-		self.check_for_tagged_header()
-		# ----------- this is where the template is broken up into parts ------------
-		self.extract_fileheader()
-		# -------header row--------
-		self.extract_header_rowstart()
-		# search for the first cell
-		found = self.extract_header_cellstart()
-		if not found: self.stop(_('Error: Table header cell start could not be identified.'), 1)
-		self.extract_header_data()
-		self.extract_header_cellend()
-		# search for each cell until no more are found
-		while self.extract_header_cellstart():
-			self.extract_header_data()
-			self.extract_header_cellend()
-		self.extract_header_rowend()
-		# --------data row---------
-		self.extract_rowstart()
-		# search for the first cell
-		found = self.extract_cellstart()
-		if not found: self.stop(_('Error: Table cell start could not be identified.'), 1)
-		self.extract_cellend()
-		# search for each cell until no more are found
-		while self.extract_cellstart():
-			self.extract_cellend()
-		self.extract_rowend()
-		# -------------------------
-		self.extract_filefooter()
-		# ---------------------------------------------------------------------------
-		if app.verbose:
+			documentfile.close()
+			self.stop(_("Error: Your Python version is too old, this program requires version 2.6 or greater"), 1)
+		documentfile.close()
+		try:
+			firstcell = self.content.getElementsByTagName('table:table-cell')[0].firstChild.firstChild
+		except:
+			firstcell = self.content.createTextNode("")
+		if firstcell.data[:8].lower() == 'csv2odf:':  # The first cell contains options
+			app.parse_args(firstcell.data[8:])
+			app.get_args()  # we want command line args to override args in the template, so reload the command line args
+			parent = firstcell.parentNode
+			while (not parent.tagName == 'table:table-row') and (not parent.tagName == 'table:table-header-row') and parent:
+				parent = parent.parentNode
+			if parent.tagName == 'table-row' or not parent.tagName == 'table-header-row':
+				firstrow = parent
+				parent = firstrow.parentNode
+				parent.removeChild(firstrow)
+				firstrow.unlink()
+				self.initial_offset = -1
+
+	def merge_document(self, data):
+		row_index = 0
+		table = self.element('table')
+		header_row = self.find_child('table-header-rows', table)
+		if not header_row:
+			header_row = self.find_child('table-row', table)
+		if app.header_from_csv:
+			merged_header_row = self.merge_row(header_row, data.row(row_index), row_index + self.initial_offset)
+			table.replaceChild(merged_header_row, header_row)
+			row_index += 1
+			unmerged_template_row = merged_header_row.nextSibling
+		else:
+			unmerged_template_row = header_row.nextSibling
+		for i in range(app.rowSkips):
+			unmerged_template_row = unmerged_template_row.nextSibling
+		if not unmerged_template_row:  # the template row does not exist
+			self.stop(_("Error: A row of sample data was not provided in the template file."), 1)
+		if app.verbose:  # display verbose report
 			i = self.filename.rfind('/') + 1
 			if i == -1: i = 0
-			print(self.filename[i:], _("has"), len(self.cellstart), _("columns."))
-	
-	def check_for_tagged_header(self):
-		'''Set self.tagged_header, a flag that indicates if "<table:table-header-rows>" is used in the first table row.'''
-		table_header_tag_position = self.buffer.find(self.pattern['header_tag'][0])
-		self.tagged_header = table_header_tag_position >= 0 and table_header_tag_position < self.buffer.find(self.pattern['header_tag'][1])
+			print(self.filename[i:], _("has"), len(unmerged_template_row.getElementsByTagName('text:p')), _("columns."))
+		# insert the first row of data into the template row
+		template_row = self.merge_row(unmerged_template_row, data.row(row_index), row_index + self.initial_offset)
+		table.replaceChild(template_row, unmerged_template_row)
+		row_index += 1
+		# insert the remaining rows of data
+		insert_point = template_row.nextSibling
+		for row_index in range(row_index, data.rows()):
+			data_row = data.row(row_index)
+			merged_row = self.merge_row(template_row, data_row, row_index)
+			table.insertBefore(merged_row, insert_point)
 
-	def extract_fileheader(self):
-		if self.tagged_header:
-			self.fileheader = self.tsearch(self.pattern['fileheader_tagged'], app.rowSkips)
-		else:
-			self.fileheader = self.tsearch(self.pattern['fileheader'], app.rowSkips)
-		if not self.fileheader: self.stop(_('Error: No header was found.'), 1)
-	
-	def extract_header_rowstart(self):
-		if self.tagged_header:
-			self.header_rowstart = self.tsearch(self.pattern['header_rowstart_tagged'])
-		else:
-			self.header_rowstart = self.tsearch(self.pattern['header_rowstart'])
-		if not self.header_rowstart: self.stop(_('Error: Table header row start could not be identified.'), 1)
+	def merge_row(self, template_row, data_row, row_index):
+		output_row = template_row.cloneNode(1)
+		cell = output_row.firstChild
+		for cell_index in range(len(data_row) + app.colSkips):
+			if cell.firstChild is None:  # an empty cell is in the template
+				self.stop(_("Error: There are too few or missing columns in the template file sample data."), 1)
+			data_column = app.order[cell_index]
+			if data_column is None:
+				data_item = ""
+			else:
+				data_item = data_row[data_column]
+			merged_cell = self.merge_cell(cell, data_item, row_index)
+			output_row.replaceChild(merged_cell, cell)
+			cell = merged_cell.nextSibling
+		return output_row
 
-	def extract_header_cellstart(self):
-		cellstart = self.tsearch(self.pattern['header_cellstart'])
-		if cellstart:
-			cellstart = cellstart.replace("/>", ">") # if the cell was left empty, the tag may end with '/>' but we want '>'
-			self.header_cellstart.append(cellstart)
-			return True
+	def merge_cell(self, template_cell, data_item, row_index):
+		output_cell = template_cell.cloneNode(1)
+		if output_cell.hasAttribute('table:formula'):
+			formula = output_cell.getAttribute('table:formula')
+			formula = self.formula_offset(formula, row_index)
+			output_cell.setAttribute('table:formula', formula)
+		if output_cell.hasAttribute('office:value'):
+			output_cell.setAttribute('office:value', data_item)
+		if output_cell.hasAttribute('office:date-value'):
+			output_cell.firstChild.firstChild.data = ""  # if it's a date, leave the cell text empty
+			output_cell.setAttribute('office:date-value', self.format_date(data_item))
 		else:
-			return False
-	
-	def extract_header_data(self):
-		self.header_data.append(self.tsearch(self.pattern['header_data']))
-	
-	def extract_header_cellend(self):
-		# the next step advances the position, but a standard cellend will be used below
-		cellend = self.tsearch(self.pattern['header_cellend'])
-		if cellend:
-			self.header_cellend.append(self.pattern['header_cellend'][3])
+			output_cell.firstChild.firstChild.data = data_item  # if it's not a date, put the value in the cell text
+		return output_cell
+
+	def element(self, element_name, occurance=1, node=None):
+		'''Search nodes for an element.  Descend into child nodes.'''
+		if node == None:
+			node = self.content
+		num_found = 0
+		for child in node.childNodes:
+			if child.nodeType == self.content.ELEMENT_NODE and child.localName == element_name:
+				num_found += 1
+				if num_found >= occurance:
+					return child
+			if child.hasChildNodes():
+				found_in_child = self.element(element_name, occurance-num_found, child)
+				if found_in_child:
+					num_found += 1
+					if num_found >= occurance:
+						return found_in_child
+		return None
+
+	def find_child(self, element_name, node, occurance=1):
+		'''Search nodes for an element.'''
+		num_found = 0
+		for child in node.childNodes:
+			if child.nodeType == self.content.ELEMENT_NODE and child.localName == element_name:
+				num_found += 1
+				if num_found >= occurance:
+					return child
+		return None
+
+	def format_date(self, date_in):
+		'''reformat a date string to a standard format'''
+		if len(app.dateformat) > 0:
+			try:
+				return self.time.strftime('%Y-%m-%dT%H:%M:%S',self.time.strptime(date_in, app.dateformat))
+			except ValueError:
+				self.stop(_("The date format ["+app.dateformat+"] could not be interpreted for data: ")+date_in, 1)
 		else:
-			self.stop(_('Error: Header cell end could not be identified.'), 1)
-	
-	def extract_header_rowend(self):
-		if self.tagged_header:
-			self.header_rowend = self.tsearch(self.pattern['header_rowend_tagged'])
-		else:
-			self.header_rowend = self.tsearch(self.pattern['header_rowend'])
-		if not self.header_rowend: self.stop(_('Error: Table header row end could not be identified.'), 1)
-	
-	def extract_rowstart(self):
-		self.rowstart = self.tsearch(self.pattern['rowstart'])
-		if not self.rowstart: self.stop(_('Error: Table row start could not be identified - was sample data provided in the template?'), 1)
-	
-	def extract_cellstart(self):
-		cellstart = self.tsearch(self.pattern['cellstart'])
-		if cellstart:
-			cellstart = cellstart.replace("/>", ">") # if the cell was left empty, the tag may end with '/>' but we want '>'
-			self.cellstart.append(cellstart)
-			return True
-		else:
-			return False
-	
-	def extract_cellend(self):
-		# the next step advances the position, but a standard cellend will be used below
-		cellend = self.tsearch(self.pattern['cellend'])
-		if cellend:
-			self.cellend.append(self.pattern['cellend'][3])
-		else:
-			self.stop(_('Error: Table first cell end could not be identified.'), 1)
-	
-	def extract_rowend(self):
-		self.rowend = self.pattern['rowend'][3]
-	
-	def extract_filefooter(self):
-		self.filefooter = self.tsearch(self.pattern['filefooter'])
-		if not self.filefooter: self.stop(_('Error: File end could not be identified.'), 1)
-	
+			return date_in
+
+	def formula_offset(self, formula, location):
+		'''Alter a spreadsheet formula so that cell references are offset to the current location.
+			inputs:
+			formula 	a string containing the formula
+			location	the current data row where the first data row is 0 '''
+		output = ""
+		remainder = formula
+		previous = 0
+		for match in self.re.finditer('[a-zA-Z][0-9]+', formula):
+			value = int(formula[match.start()+1:match.end()])
+			output += formula[previous:match.start()+1] + str(value + location)
+			remainder = formula[match.end():]
+			previous = match.end()
+		return output + remainder
+
+	def insert_dates(self, node=None):
+		'''Search nodes for [date] keywords in text, replace with current time.  Descend into child nodes.'''
+		if node == None: # a node was not provided, use root of document content
+			node = self.content
+		for child in node.childNodes:
+			if child.nodeType == self.content.TEXT_NODE:
+				child.data = self.insert_date(child.data)
+			if child.hasChildNodes():
+				self.insert_dates(child)
+
 	def insert_date(self, string):
-		'''Searches for a date tag like [date] 
+		'''Searches for a date tag like [date]
 		or a date tag with a format like [date %Y-%m-%d]
 		or a date tag with an offset like [date-1] in days
 		and replaces it with the local date. '''
+		if string == None:
+			return None
 		position = 0
 		start = string.lower().find("[date", position)
 		position = start
@@ -462,86 +496,60 @@ class user_template_file:
 			position = start + len(time_string)
 			start = string.lower().find("[date", position)
 		return string
-	
-	position = 0	# static variable for tsearch, each search begins where the last one ended
-	
-	def tsearch(self, pattern, toofarskips=0):
-		'''Search a buffer for a pair of strings and return everything between them.
-			If startstring is empty, just start where we are.
-			If endstring is empty, end just before toofarstring. '''
-		startstring = pattern[0]
-		endstring = pattern[1]
-		toofarstring = pattern[2]
-		reset_position = self.position
-		# set the limit
-		if toofarstring:
-			limit = self.buffer.find(toofarstring, self.position)
-			tryNextLimit = limit
-			while toofarskips > 0 and tryNextLimit > 0:
-				# if we want to go past the first occurrance of toofarstring, we go to next one here
-				tryNextLimit = self.buffer.find(toofarstring, self.position+limit+1)
-				if tryNextLimit > 0: limit = tryNextLimit	# the next limit was found
-				toofarskips -= 1
-			if toofarskips > 0: print(_("Warning: The number of requested lines to skip were fewer than lines available in the template."))
-		else:
-			limit = 0
-		# search for start string
-		if startstring:
-			start = self.buffer.find(startstring, self.position)
-			self.position += len(startstring)
-		else:
-			start = self.position
-		if start >= 0 and (start < limit or limit == 0):
-			# search for end string
-			wildcard = endstring.find('*')
-			if wildcard >= 0:
-				end = self.buffer.find(endstring[:wildcard], self.position)
-				if end >=0:
-					self.position = end
-					endstring = endstring[wildcard+1:]
-			if limit > 0 and not endstring:
-				end = limit
+
+	def repackage(self, out_filename):
+		'''Take an odf document and pass each file contained in it to the output except replace content.xml with data.'''
+		success = 0
+		if app.xml:  # output an xml file, not an odf
+			outputfile = open(out_filename,'w')
+			if sys.version_info[0] >= 3:
+				outputfile.write(self.content.toxml())
 			else:
-				end = self.buffer.find(endstring, self.position)
-			if limit > 0 and end > limit: end = -1
-		else:
-			# start was not found
-			end = -1
-		if end>=0:
-			# get ready to return
-			end += len(endstring)
-			self.position = end
-			data = self.buffer[start:end]
-			return data
-		else:
-			# start and/or end were not found, return nothing
-			self.position = reset_position
-			return ""
-	
+				outputfile.write(self.content.toxml().encode('utf-8'))
+			outputfile.close()
+			success = 1
+		else:  # output an odf file
+			documentfile = self.zipfile.ZipFile(self.filename,'r')
+			try:
+				outputfile = self.zipfile.ZipFile(out_filename,'w')
+			except:
+				documentfile.close()
+				self.stop(_("Error opening output: ")+out_filename, 1)
+			try:
+				for name in documentfile.namelist():
+					if name == "content.xml":
+						outputfile.writestr(name, self.content.toxml().encode('utf-8'))
+						success = 1
+					else:
+						content = documentfile.read(name)
+						outputfile.writestr(name, content)
+			finally:
+				documentfile.close()
+				outputfile.close()
+		return success
+
 	def stop(self, message="", errnum=0):
 		'''Terminate the program with a message.'''
 		print(message)
 		sys.exit(errnum)
-	
-	def __init__(self, filename):
-		self.pattern = self.odf_pattern
-		self.filename = filename
-		self.read_odf()
-		self.fileheader = self.insert_date(self.fileheader)
-		self.filefooter = self.insert_date(self.filefooter)
+
+	def content():
+		return self.content
+
+	# end class document_processor
 
 class incoming_data_source:
-	
+
 	#properties
 	filename = ""
 	buffer = []
-	
+
 	# these app variables are used:
 	#app.start
 	#app.end
 	#app.delimiter
 	#app.verbose
-	
+
 	def read_csv(self):
 		'''Read a csv file and split each line into lists of data elements.'''
 		inputfile = open(self.filename,'r')
@@ -592,172 +600,45 @@ class incoming_data_source:
 			i = self.filename.rfind('/') + 1
 			if i == -1: i = 0
 			print(self.filename[i:], _("has"), rows_out, _("rows and"), len(self.buffer[0]), _("columns."))
-	
+
+	def item(self, row, col):
+		'''Return a data item at the specified row and column position.'''
+		if row == None or col == None:
+			return None
+		else:
+			return self.buffer[row][col]
+
+	def row(self, row):
+		'''Return a row of data.'''
+		return self.buffer[row]
+
+	def rows(self):
+		'''Return the number of rows.'''
+		return len(self.buffer)
+
+	def columns(self):
+		'''Return the number of columns.'''
+		return len(self.buffer[0])
+
+	def content(self):
+		return self.buffer
+
 	def __init__(self, filename):
 		self.filename = filename
 		self.read_csv()
 
-class merged_data_document:
-	
-	import zipfile, time, re
-	
-	#properties
-	output = ""
-	
-	# these app variables are used:
-	#app.xml
-	#app.header_from_csv
-	#app.debug
-	#app.colSkips
-	#app.dateformat
-	#app.order
-	
-	def formulaOffset(self, formula, location):
-		'''Alter a spreadsheet formula so that cell references are offset to the current location.
-			inputs:
-			formula 	a string containing the formula
-			location	the current data row where the first data row is 0 '''
-		output = ""
-		remainder = formula
-		previous = 0
-		for match in self.re.finditer('[a-zA-Z][0-9]+', formula):
-			value = int(formula[match.start()+1:match.end()])
-			output += formula[previous:match.start()+1] + str(value + location)
-			remainder = formula[match.end():]
-			previous = match.end()
-		return output + remainder
-	
-	def merge(self):
-		'''Merge data elements into a template containing a table; duplicate table rows for each data row.'''
-		self.output = self.template.fileheader
-		# ----- Merge the header row -----
-		if app.debug: self.output += '{header_rowstart}'
-		self.output += self.template.header_rowstart
-		for i in range(len(self.template.header_cellstart)):
-			if app.header_from_csv:
-				valuetag = self.template.header_cellstart[i].find('value="')
-				if valuetag >= 0:	# For spreadsheets, fill the "value" tag with the data value
-					valuetag = self.template.header_cellstart[i].find('"', valuetag)
-					valuetag2 = self.template.header_cellstart[i].find('"', valuetag+1)
-					if app.debug: self.output.join('{header_cellstart}')
-					self.output.join(self.template.header_cellstart[i][:valuetag+1])
-					if len(app.dateformat) > 0 and self.template.header_cellstart[i].find('value-type="date"') >= 0:
-						try:
-							self.output += self.time.strftime('%Y-%m-%dT%H:%M:%S',self.time.strptime(self.data.buffer[0][i], app.dateformat))
-						except ValueError:
-							self.stop(_("The date format ["+app.dateformat+"] could not be interpreted for data: ")+self.data.buffer[0][i], 1)
-					else:
-						self.output += self.data.buffer[0][i]
-					if app.debug: self.output += '{header_cellstart}'
-					self.output += self.template.header_cellstart[i][valuetag2:]
-				else:
-					if app.debug: self.output += '{header_cellstart}'
-					self.output += self.template.header_cellstart[i]
-				if app.order[i] >= 0:
-					self.output += self.data.buffer[0][app.order[i]]
-			else:
-				if app.debug: self.output += '{header_cellstart}'
-				self.output += self.template.header_cellstart[i]
-				self.output += self.template.header_data[i]
-			if app.debug: self.output += '{header_cellend}'
-			self.output += self.template.header_cellend[i]
-		if app.debug: self.output += '{header_rowend}'
-		self.output += self.template.header_rowend
-		# ----- Merge the remaining data rows -----
-		for i in range(app.header_from_csv, len(self.data.buffer)):
-			if app.debug: self.output += '{rowstart'+str(len(self.data.buffer[i]))+','+str(len(self.template.cellstart))+'}'
-			self.output += self.template.rowstart
-			for j in range( min( len(self.data.buffer[i])+app.colSkips, len(self.template.cellstart) ) ):
-				valuetag = self.template.cellstart[j].find('value="')
-				formulatag = self.template.cellstart[j].find('formula="')
-				if valuetag >= 0 and app.order[j] >= 0:	# For spreadsheets, fill the "value" tag with the data value
-						# Do this only if order is positive (negative means we should leave the value unchanged)
-					valuetag = self.template.cellstart[j].find('"', valuetag)
-					valuetag2 = self.template.cellstart[j].find('"', valuetag+1)
-					if app.debug: self.output += '{cellstart}'
-					self.output += self.template.cellstart[j][:valuetag+1]
-					if app.dateformat and self.template.cellstart[j].find('value-type="date"') >= 0:
-						try:
-							self.output += self.time.strftime('%Y-%m-%dT%H:%M:%S',self.time.strptime(self.data.buffer[i][app.order[j]], app.dateformat))
-						except ValueError:
-							self.stop(_("The date format ["+app.dateformat+"] could not be interpreted for data2: ")+self.data.buffer[i][app.order[j]], 1)
-					else:
-						self.output += self.data.buffer[i][app.order[j]]
-					if app.debug: self.output += '{cellstart2}'
-					self.output += self.template.cellstart[j][valuetag2:]
-				elif formulatag >= 0 and app.order[j] < 0:
-					formulatag = self.template.cellstart[j].find('"', formulatag)
-					formulatag2 = self.template.cellstart[j].find('"', formulatag+1)
-					formula = self.template.cellstart[j][formulatag:formulatag2]
-					self.output += self.template.cellstart[j][:formulatag] + self.formulaOffset(formula, i) + self.template.cellstart[j][formulatag2:]
-				else:
-					if app.debug: self.output += '{cellstart}'
-					self.output += self.template.cellstart[j]
-				if app.order[j] >= 0:
-					self.output += self.data.buffer[i][app.order[j]]
-				if app.debug: self.output += '{cellend}'
-				self.output += self.template.cellend[j]
-			if app.debug: self.output += '{rowend}'
-			self.output += self.template.rowend
-		if app.debug: self.output += '{filefooter}'
-		self.output += self.template.filefooter
-	
-	def non_merge(self):
-		self.output = self.template.buffer
-	
-	def write_output(self):
-		'''Take an odf template and pass each file contained in it to the output except replace content.xml with data.'''
-		success = 0
-		if app.xml:
-			outputfile = open(self.filename,'w')
-			outputfile.write(self.output)
-			outputfile.close()
-			success = 1
-		else:
-			templatefile = self.zipfile.ZipFile(self.template.filename,'r')
-			try:
-				outputfile = self.zipfile.ZipFile(self.filename,'w')
-			except:
-				templatefile.close()
-				self.stop(_("Error opening output: ")+self.filename, 1)
-			try:
-				for elementname in templatefile.namelist():
-					if elementname == "content.xml":
-						outputfile.writestr(elementname, self.output)
-						success = 1
-					else:
-						file = templatefile.read(elementname)
-						outputfile.writestr(elementname, file)
-			finally:
-				templatefile.close()
-				outputfile.close()
-		return success
-	
-	def stop(self, message="", errnum=0):
-		'''Terminate the program with a message.'''
-		print(message)
-		sys.exit(errnum)
-	
-	def __init__(self, filename, template, data=""):
-		self.filename = filename
-		self.data = data
-		self.template = template
-		if self.data and not app.order:
-			app.order = list(range(len(self.data.buffer[0])))
+	# end class incoming_data_source
 
 if __name__ == "__main__":
 	app = application_initializer()
-	if app.nodata:
-		# The command line said not to process data, just pass through the input
-		template = user_template_file(app.template_file)
-		output = merged_data_document(app.out_file, template)
-		output.non_merge()
-	else:
-		# This is the normal data processing operation
+	document = document_processor(app.document_file)
+	app.test_args()
+	document.insert_dates()
+	if not app.nodata:
 		data = incoming_data_source(app.csv_file)
-		template = user_template_file(app.template_file)
-		output = merged_data_document(app.out_file, template, data)
-		output.merge()
-	output.write_output()
+		if not app.order: # if no order was specified, setup the default
+			app.order = range(data.columns())
+		document.merge_document(data)
+	document.repackage(app.out_file)
 
 #kate: tab-width 4;
