@@ -1,3 +1,10 @@
+csv2odf (1.10) unstable; urgency=low
+
+  * Preserve the position of filters when options are in the template.
+  * Fixed injection of multiple lines within csv data cells.
+
+ -- Larry Jordan <w322@users.sourceforge.net>  03 Apr 2014 12:00:00 +0000
+
 csv2odf (1.09) unstable; urgency=low
 
   * Fixed bug causing unreadable output in xlsx format.

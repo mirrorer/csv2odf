@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# csv2odf  v1.09
-# Copyright (C) 2012 Larry Jordan <w322 at users.sourceforge.net>
+# csv2odf  v1.10
+# Copyright (C) 2014 Larry Jordan <w322 at users.sourceforge.net>
 
 '''Convert a csv file to odf, ods, html, xlsx,
  or docx format.  csv2odf is a command line tool that
  can convert a comma separated value (csv) file to an
  odf, ods, html, xlsx, or docx document that can be viewed
- in OpenOffice.org and other office productivity
+ in LibreOffice and other office productivity
  programs. csv2odf is useful for creating reports from
  databases and other data sources that produce csv files.
  csv2odf can be combined with cron and shell scripts
@@ -16,7 +16,7 @@
 
  The output format (fonts, number formatting, etc.) is
  controlled by a template file that you design in
- OpenOffice.org.'''
+ LibreOffice.'''
 
 # csv2odf is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -49,7 +49,7 @@ def _(string=""):    #support for localization, not yet implemented
 
 class ApplicationInitializer:
 
-    VERSION = "1.09"
+    VERSION = "1.10"
 
     # default properties
     quiet = 0
@@ -84,7 +84,7 @@ class ApplicationInitializer:
         print(_("to automatically generate business reports."))
         print(_(""))
         print(_("The csv data is merged with a template file to produce the output file."))
-        print(_("The template is a document file as produced by OpenOffice.org or  Word,"))
+        print(_("The template is a document file as produced  by  LibreOffice  or  Word,"))
         print(_("or an html file.  The template can be a spreadsheet file (ods or xlsx),"))
         print(_("a document file (odt or docx), or an html file."))
         print(_(""))
@@ -466,6 +466,7 @@ class DocumentProcessor:
     inner_filename = [] # a string list containing the filename(s) to be processed in the source file
     content = []  # the xml document object model
     string_file = "" # the sharedString file in an ooxml file
+    worksheet_index = "" # worksheet index file in an ooxml file
     table_name = "" # the tab name of the table
     initial_offset = 0 # used to adjust the row number
     last_row = 0 # the number of the last inserted data row
@@ -481,7 +482,8 @@ class DocumentProcessor:
             'formula': 'table:formula',
             'chartref': 'draw:object',
             'chartRefNotifyRange': 'draw:notify-on-update-of-ranges',
-            'chartRefLink': 'xlink:href'},
+            'chartRefLink': 'xlink:href',
+            'filter': 'table:database-ranges'},
         'odt':
             {
             'table': 'table:table',
@@ -491,7 +493,8 @@ class DocumentProcessor:
             'formula': None,
             'chartref': None,
             'chartRefNotifyRange': None,
-            'chartRefLink': None},
+            'chartRefLink': None,
+            'filter': None},
         'html-table':
             {
             'table': 'table',
@@ -501,7 +504,8 @@ class DocumentProcessor:
             'formula': None,
             'chartref': None,
             'chartRefNotifyRange': None,
-            'chartRefLink': None},
+            'chartRefLink': None,
+            'filter': None},
         'html-div':
             {
             'table': 'div',
@@ -511,7 +515,8 @@ class DocumentProcessor:
             'formula': None,
             'chartref': None,
             'chartRefNotifyRange': None,
-            'chartRefLink': None},
+            'chartRefLink': None,
+            'filter': None},
         'xlsx':
             {
             'table': 'sheetData',
@@ -521,7 +526,8 @@ class DocumentProcessor:
             'formula': 'f',
             'chartref': None,
             'chartRefNotifyRange': None,
-            'chartRefLink': None},
+            'chartRefLink': None,
+            'filter': 'autoFilter'},
         'docx':
             {
             'table': 'w:tbl',
@@ -531,7 +537,8 @@ class DocumentProcessor:
             'formula': None,
             'chartref': None,
             'chartRefNotifyRange': None,
-            'chartRefLink': None},
+            'chartRefLink': None,
+            'filter': None},
         }
     shared_string_list = []
     indexed_original_end = 0
@@ -613,8 +620,8 @@ class DocumentProcessor:
     def read_xlsx(self):
         '''Read an xlsx file (either odt or ods) and parse content'''
         # get table name
-        worksheet_index = self.read_inner_document("xl/workbook.xml")
-        sheet_index_elements = worksheet_index.getElementsByTagName("sheet")
+        self.worksheet_index = self.read_inner_document("xl/workbook.xml")
+        sheet_index_elements = self.worksheet_index.getElementsByTagName("sheet")
         self.xlsx_sheet_count = len(sheet_index_elements)
         for sheet_index_element in sheet_index_elements:
             if sheet_index_element.hasAttribute("sheetId"):
@@ -647,6 +654,14 @@ class DocumentProcessor:
                 firstrow.unlink()
                 self.xlsx_shift_row(parent, -1)
                 self.initial_offset = -1
+                db_range_list = self.worksheet_index.getElementsByTagName("definedNames")
+                if db_range_list:
+                    for db_range in db_range_list[0].childNodes:
+                        if db_range.getAttribute("name") == "_xlnm._FilterDatabase":
+                            db_range.firstChild.data = self.re.sub('(^'+self.table_name+'!\${0,1}[A-Za-z]{1,3}\${0,1})(' 
+                                +str(app.rowSkips + 2)+')(:\${0,1}[A-Za-z]{1,3}\${0,1})([0-9]+)',   
+                                r'\g<1>'+str(app.rowSkips + 2 + self.initial_offset)+r'\g<3>'+str(app.rowSkips + 2 + self.initial_offset), db_range.firstChild.data)
+                        
 
     def read_docx(self):
         '''Read a docx file (either odt or ods) and parse content'''
@@ -700,6 +715,13 @@ class DocumentProcessor:
                 if sheet_index == app.table:
                     table = self.element(self.pattern[self.doctype]['table']) # extract table
                     self.merge_table(table, data)
+                    if self.initial_offset != 0:  # check for autofilter and adjust for inital offset
+                        filter = sheet.getElementsByTagName(self.pattern[self.doctype]['filter'])
+                        range_attribute = filter[0].getAttribute('ref')
+                        range_attribute = self.re.sub('(^[A-Za-z]{1,3})(' 
+                            +str(app.rowSkips + 2)+')(:[A-Za-z]{1,3})'+str(app.rowSkips + 2),   
+                            r'\g<1>'+str(app.rowSkips + 2 + self.initial_offset)+r'\g<3>'+str(app.rowSkips + 2 + self.initial_offset), range_attribute)
+                        filter[0].setAttribute('ref', range_attribute)
                 formulas = sheet.getElementsByTagName(self.pattern[self.doctype]['formula'])
                 for formula in formulas:
                     try:
@@ -755,6 +777,17 @@ class DocumentProcessor:
                                 notifyRange = chartref.getAttribute(self.pattern[self.doctype]['chartRefNotifyRange'])
                                 notifyRange = self.global_array_expand(notifyRange, self.table_name, app.rowSkips + 2, self.last_row)
                                 chartref.setAttribute(self.pattern[self.doctype]['chartRefNotifyRange'], notifyRange)
+            if self.initial_offset != 0:  # check for a db range (used for filters) and adjust for inital offset
+                db_range_list = self.content[0].getElementsByTagName(self.pattern[self.doctype]['filter'])
+                if db_range_list:
+                    db_ranges = db_range_list[0].getElementsByTagName('table:database-range')
+                    for db_range in db_ranges: # scan for db ranges such as filters set to target data
+                        range_attribute = db_range.getAttribute('table:target-range-address')
+                        range_attribute = self.re.sub('(^'+self.table_name+'\.[A-Za-z]{1,3})(' 
+                            +str(app.rowSkips + 2)+')(:'
+                            +self.table_name+'\.[A-Za-z]{1,3}[0-9]+)',   
+                            r'\g<1>'+str(app.rowSkips + 2 + self.initial_offset)+r'\3', range_attribute)
+                        db_range.setAttribute('table:target-range-address', range_attribute)
         
     def merge_table(self, table, data):
         '''Input:
@@ -928,7 +961,16 @@ class DocumentProcessor:
                 output_cell.setAttribute('table:formula', formula)
             if output_cell.hasAttribute('office:value'):
                 output_cell.setAttribute('office:value', data_item)
-            output_cell.firstChild.firstChild.data = data_item
+            text_line_list = data_item.splitlines()
+            paragraph = output_cell.firstChild
+            paragraph_template = paragraph.cloneNode(True)
+            if not text_line_list: text_line_list = [""]
+            paragraph.firstChild.data = text_line_list[0]
+            for text_line in text_line_list[1:]:
+                last_paragraph = paragraph_template.cloneNode(True)
+                last_paragraph.firstChild.data = text_line  # put the value in the cell text
+                output_cell.appendChild(last_paragraph)
+            
         elif self.doctype == 'xlsx':
             formula = self.element('f', node=output_cell)
             if formula:
@@ -1145,18 +1187,27 @@ class DocumentProcessor:
         new_row.appendChild(self.create_cell_node("", column_number, row_number, formula_offset))
         return new_row
 
-    def create_cell_node(self, data_item, column_number, row_number, formula_offset):
+    def create_cell_node(self, data_string, column_number, row_number, formula_offset):
         new_cell_node = self.content[0].createElement(self.pattern[self.doctype]['cellstart'][0])
-        if self.pattern[self.doctype]['textnode'] is None:
-            new_cell_node.appendChild(self.content[0].createTextNode(data_item))
-        else:
-            new_text_node = self.content[0].createElement(self.pattern[self.doctype]['textnode'])
-            new_text_node.appendChild(self.content[0].createTextNode(data_item))
-            new_cell_node.appendChild(new_text_node)
         if self.doctype == 'xlsx':
+            if self.pattern[self.doctype]['textnode'] is None:
+                new_cell_node.appendChild(self.content[0].createTextNode(data_string))
+            else:
+                new_text_node = self.content[0].createElement(self.pattern[self.doctype]['textnode'])
+                new_text_node.appendChild(self.content[0].createTextNode(data_string))
+                new_cell_node.appendChild(new_text_node)
             new_cell_node.setAttribute('t', 's')
             new_cell_node.setAttribute('r', self.column_letter(column_number)+str(row_number))
-            new_cell_node = self.merge_cell(new_cell_node, data_item, row_number, formula_offset)
+            new_cell_node = self.merge_cell(new_cell_node, data_string, row_number, formula_offset)
+        else:
+            if self.pattern[self.doctype]['textnode'] is None:
+                new_cell_node.appendChild(self.content[0].createTextNode(data_string))
+            else:
+                data_list = data_string.splitlines()
+                for data_item in data_list:
+                    new_text_node = self.content[0].createElement(self.pattern[self.doctype]['textnode'])
+                    new_text_node.appendChild(self.content[0].createTextNode(data_item))
+                    new_cell_node.appendChild(new_text_node)
         return new_cell_node
 
     def column_letter(self, n):
@@ -1330,6 +1381,8 @@ class DocumentProcessor:
                             si.appendChild(t)
                             sst.appendChild(si)
                         outputfile.writestr(name, self.string_file.toxml().encode('utf-8'))
+                    elif name == "xl/workbook.xml" and self.initial_offset != 0:
+                        outputfile.writestr(name, self.worksheet_index.toxml('UTF-8'))
                     else:
                         content = documentfile.read(name)
                         outputfile.writestr(name, content)

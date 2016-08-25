@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 #
-# csv2odf 1.09
-# Copyright (C) 2012 Larry Jordan
+# csv2odf 1.10
+# Copyright (C) 2014 Larry Jordan
 # <http://csv2odf.sourceforge.net>
 #
 # This program is free software; you can redistribute it and/or modify
@@ -24,7 +24,7 @@
 import distutils.core
 
 distutils.core.setup(name='csv2odf',
-      version='1.09',
+      version='1.10',
       description='Convert csv files to open document format',
       url = 'http://csv2odf.sourceforge.net',
       license='GNU GPL-3',
@@ -39,7 +39,7 @@ distutils.core.setup(name='csv2odf',
  or docx format.  csv2odf is a command line tool that\
  can convert a comma separated value (csv) file to an\
  odf, ods, html, xlsx, or docx document that can be\
- viewed in OpenOffice.org and other office productivity\
+ viewed in LibreOffice and other office productivity\
  programs. csv2odf is useful for creating reports from\
  databases and other data sources that produce csv files.\
  csv2odf can be combined with cron and shell scripts\
@@ -47,7 +47,7 @@ distutils.core.setup(name='csv2odf',
  .\
  The output format (fonts, number formatting, etc.) is\
  controlled by a template file that you design in\
- OpenOffice.org.\
+ LibreOffice.\
  .\
  csv2odf is written in Python.'
      )

@@ -1,4 +1,4 @@
-.TH "csv2odf" "1" "Jan 2012" "Larry Jordan" "Text Processing"
+.TH "csv2odf" "1" "Apr 2014" "Larry Jordan" "Text Processing"
 .SH "NAME"
 .LP
 csv2odf \- convert csv files to open document format
@@ -9,7 +9,7 @@ csv2odf [\fIoption\fP] [<\fIcsvfile\fP>] <\fItemplatefile\fP> [<\fIoutputfile\fP
 .LP
 csv2odf is a command line tool that can convert a \fIcomma seperated value\fR (csv) file into an ods, odt, html, xlsx, or docx document.  csv2odf is useful for creating reports from databases and other data sources that produce csv files.  csv2odf can be combined with cron and shell scripts to automatically generate business reports.
 .LP
-The csv data is merged with a \fItemplate\fR file to produce the output file.  The template is a document file as produced by OpenOffice.org or Word, or an html file.  The template can be a spreadsheet file (ods or xlsx), a document file (odt or docx), or an html file.
+The csv data is merged with a \fItemplate\fR file to produce the output file.  The template is a document file as produced by LibreOffice or Word, or an html file.  The template can be a spreadsheet file (ods or xlsx), a document file (odt or docx), or an html file.
 .LP
 If a csv input file is not specified, input will be taken from standard input (stdin).  If an output file is not specified, output will be directed to standard output (stdout).  This allows the use of the command in pipes.
 .LP
@@ -162,7 +162,7 @@ Insert data into a spreadsheet:
 .IP
 \fBcsv2odf data.csv template.ods output.ods\fR
 .LP
-Insert data into an OpenOffice text document:
+Insert data into an LibreOffice text document:
 .IP
 \fBcsv2odf data.csv template.odt output.odt\fR
 .LP

@@ -16,9 +16,9 @@ DESCRIPTION
        to automatically generate business reports.
 
        The csv data is merged with a template file to produce the output file.
-       The template is a document file as produced by OpenOffice.org or  Word,
-       or an html file.  The template can be a spreadsheet file (ods or xlsx),
-       a document file (odt or docx), or an html file.
+       The template is a document file as produced by LibreOffice or Word,  or
+       an  html file.  The template can be a spreadsheet file (ods or xlsx), a
+       document file (odt or docx), or an html file.
 
        If a csv input file is not specified, input will be taken from standard
        input  (stdin).   If  an  output  file is not specified, output will be
@@ -177,7 +177,7 @@ EXAMPLES
 
               csv2odf data.csv template.ods output.ods
 
-       Insert data into an OpenOffice text document:
+       Insert data into an LibreOffice text document:
 
               csv2odf data.csv template.odt output.odt
 
@@ -206,4 +206,4 @@ EXAMPLES
 
 
 
-Larry Jordan                       Jan 2012                         csv2odf(1)
+Larry Jordan                       Apr 2014                         csv2odf(1)
