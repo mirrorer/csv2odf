@@ -1,3 +1,9 @@
+csv2odf (1.01); urgency=low
+
+   * Minor code cleanup
+
+   -- Larry Jordan  <w322 at users.souceforge.net>  2009-11-07
+
 csv2odf (1.00); urgency=low
 
    * First release.

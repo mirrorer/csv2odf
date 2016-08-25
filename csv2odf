@@ -1,6 +1,7 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 #
-# csv2odf  v1.00
+# csv2odf  v1.01
 # Copyright (C) 2009 Larry Jordan <w322 at users.sourceforge.net>
 #
 # csv2odf is free software: you can redistribute it and/or modify
@@ -156,14 +157,14 @@ class application_initializer:
 	
 	def int_minus_1(self, string):
 		'''Converts a string to an integer and subtracts 1. '''
-		if len(string) > 0:
+		if string:
 			try:
 				n = int(string)
 			except ValueError:
-				print _("Error: ")+string+_(" does not look like a number")
+				print _("Error:"), string, _("does not look like a number")
 				sys.exit(1)
 			if n < 1:
-				print _("Error: ")+string+_(" cannot be less than 1")
+				print _("Error:"), string, _("cannot be less than 1")
 				sys.exit(1)
 			return n - 1
 		else:
@@ -221,7 +222,7 @@ class application_initializer:
 				self.stop(_("Error: Unrecognized option "+o), 1)
 		if self.showhelp:
 			self.help()
-			if len(argumentlist) > 0 and not self.quiet:
+			if argumentlist and not self.quiet:
 				print
 				print _("Warning: when help is displayed, no files are processsed")
 			sys.exit(0)
@@ -231,28 +232,28 @@ class application_initializer:
 		#parse and validate arguments
 		for argument in argumentlist:
 			if self.extention(argument) in ('ods', 'odt'):
-				if len(self.odf_file) == 0: 
+				if not self.odf_file: 
 					self.odf_file = argument
-				elif len(self.out_file) == 0:
+				elif not self.out_file:
 					self.out_file = argument
 				else:
 					self.stop(_("Error: expected two files of ods/odt type, got more than two"), 1)
 			elif self.extention(argument) == 'csv':
-				if len(self.csv_file) == 0:
+				if not self.csv_file:
 					self.csv_file = argument
 				else:
 					self.stop(_("Error: expected one file of csv type, got more than one"), 1)
 			elif self.extention(argument) == 'xml':
-				if len(self.out_file) == 0:
+				if not self.out_file:
 					self.out_file = argument
 					self.xml = 1
 					if self.verbose: print _("Producing xml output file")
-			elif argument == argumentlist[2] and len(self.odf_file)>0 and len(self.csv_file)>0 and len(self.out_file)==0:
+			elif argument == argumentlist[2] and self.odf_file and self.csv_file and not self.out_file:
 				#out_file has not been identified but both other files have, just use the 3rd argument
 				self.out_file = argument
-		if len(self.odf_file) == 0: self.stop(_("Error: there were no ods or odt files found."), 1)
-		if len(self.out_file) == 0: self.stop(_("Error: there was no output file found."), 1)
-		if len(self.csv_file) == 0: self.stop(_("Error: there was no csv file found."), 1)
+		if not self.odf_file: self.stop(_("Error: there were no ods or odt files found."), 1)
+		if not self.out_file: self.stop(_("Error: there was no output file found."), 1)
+		if not self.csv_file: self.stop(_("Error: there was no csv file found."), 1)
 		if not self.extention(self.odf_file) == self.extention(self.out_file) and not (self.quiet or self.xml): 
 			print _("Warning: the template and output files should be of the same type.")
 		if not os.path.exists(self.odf_file): self.stop(_("Error: file was not found: ")+self.odf_file, 1)
@@ -311,22 +312,22 @@ class user_template_file:
 			self.fileheader = self.tsearch('<?xml', '', '<table:table-header-rows>', app.rowSkips)
 		else:
 			self.fileheader = self.tsearch('<?xml', '', '<table:table-row', app.rowSkips)
-		if len(self.fileheader) == 0: self.stop(_('Error: No header was found.'), 1)
+		if not self.fileheader: self.stop(_('Error: No header was found.'), 1)
 		# -------header row--------
 		if tagged_header:
 			self.header_rowstart = self.tsearch('<table:table-header-rows', '<table:table-row*>')
 		else:
 			self.header_rowstart = self.tsearch('<table:table-row', '', '<table:table-cell')
-		if len(self.header_rowstart) == 0: self.stop(_('Error: Table header row start could not be identified.'), 1)
+		if not self.header_rowstart: self.stop(_('Error: Table header row start could not be identified.'), 1)
 		# search for the first cell
 		self.header_cellstart[0] = self.tsearch('<table:table-cell', '<text:p*>', '</table:table-row>')
-		if len(self.header_cellstart[0]) == 0: self.stop(_('Error: Table header cell start could not be identified.'), 1)
+		if not self.header_cellstart[0]: self.stop(_('Error: Table header cell start could not be identified.'), 1)
 		# if the cell was left empty, the tag may end with '/>' but we want '>'
 		self.header_cellstart[0] = self.header_cellstart[0].replace("/>", ">")
 		self.header_data[0] = self.tsearch('', '', '</text:p>')
 		# the next step advances the position, but a standard cellend will be used below
 		self.header_cellend[0] = self.tsearch('', '</table:table-cell>', '</table:table-row>')
-		if len(self.header_cellend[0]) == 0: self.stop(_('Error: Header first cell end could not be identified.'), 1)
+		if not self.header_cellend[0]: self.stop(_('Error: Header first cell end could not be identified.'), 1)
 		self.header_cellend[0] = '</text:p></table:table-cell>'
 		# search for each cell until no more are found
 		testlength = len(self.header_cellstart[0])
@@ -340,7 +341,7 @@ class user_template_file:
 				self.header_data.append(self.tsearch('', '', '</text:p>'))
 				# the next step advances the position, but a standard cellend will be used below
 				self.header_cellend.append(self.tsearch('', '</table:table-cell>', '</table:table-row>'))
-				if len(self.header_cellend[i]) == 0: self.stop(_('Error: Header cell end could not be identified.'), 1)
+				if not self.header_cellend[i]: self.stop(_('Error: Header cell end could not be identified.'), 1)
 				self.header_cellend[i] = '</text:p></table:table-cell>'
 			else:
 				self.header_cellstart.pop()	# remove the empty cellstart string
@@ -348,37 +349,36 @@ class user_template_file:
 			self.header_rowend = self.tsearch('</table:table-row>', '</table:table-header-rows>')
 		else:
 			self.header_rowend = self.tsearch('', '</table:table-row>')
-		if len(self.header_rowend) == 0: self.stop(_('Error: Table header row end could not be identified.'), 1)
+		if not self.header_rowend: self.stop(_('Error: Table header row end could not be identified.'), 1)
 		# --------data row---------
 		self.rowstart = self.tsearch('<table:table-row', '>')
-		if len(self.rowstart) == 0: self.stop(_('Error: Table row start could not be identified.'), 1)
+		if not self.rowstart: self.stop(_('Error: Table row start could not be identified - was sample data provided in the template?'), 1)
 		# search for the first cell
 		self.cellstart[0] = self.tsearch('<table:table-cell', '<text:p*>', '</table:table-row>')
-		if len(self.cellstart[0]) == 0: self.stop(_('Error: Table cell start could not be identified.'), 1)
+		if not self.cellstart[0]: self.stop(_('Error: Table cell start could not be identified.'), 1)
 		# if the cell was left empty, the tag may end with '/>' but we want '>'
 		self.cellstart[0] = self.cellstart[0].replace("/>", ">")
 		# the next step advances the position, but a standard cellend will be used below
 		self.cellend[0] = self.tsearch('', '</table:table-cell>', '</table:table-row>')
-		if len(self.cellend[0]) == 0: self.stop(_('Error: Table first cell end could not be identified.'), 1)
+		if not self.cellend[0]: self.stop(_('Error: Table first cell end could not be identified.'), 1)
 		self.cellend[0] = '</text:p></table:table-cell>'
 		# search for each cell until no more are found
 		testlength = len(self.cellstart[0])
-		while testlength > 0:
+		while testlength:
 			self.cellstart.append(self.tsearch('<table:table-cell', '<text:p*>', '</table:table-row>'))
 			i = len(self.cellstart)-1 #point i to the last index
 			testlength = len(self.cellstart[i])
-			if testlength > 0:
+			if testlength:
 				# if the cell was left empty, the tag may end with '/>' but we want '>'
 				self.cellstart[i] = self.cellstart[i].replace("/>", ">")
 				# the next step advances the position, but a standard cellend will be used below
 				self.cellend.append(self.tsearch('', '</table:table-cell>', '</table:table-row>'))
-				#if len(self.cellend[i]) == 0: self.stop(_('Error: Table cell end could not be identified.'), 1)
 				self.cellend[i] = '</text:p></table:table-cell>'
 			else:
 				self.cellstart.pop()	# remove the empty cellstart string
 		self.rowend = '</table:table-row>'
 		self.filefooter = self.tsearch('</table:table>', '</*document-content>')
-		if len(self.filefooter) == 0: self.stop(_('Error: Footer could not be identified.'), 1)
+		if not self.filefooter: self.stop(_('Error: Footer could not be identified.'), 1)
 		# ---------------------------------------------------------------------------
 		if app.verbose:
 			i = self.filename.rfind('/') + 1
@@ -412,7 +412,7 @@ class user_template_file:
 					# the string cannot be interpreted, assume it should be part of the date format and not an offset
 					offset = 0
 			date_spec = date_spec[1:]	# eliminate the space before the time format
-			if len(date_spec) == 0:
+			if not date_spec:
 				date_spec = "%Y-%m-%d"
 			time_string = self.time.strftime(date_spec, self.time.localtime(self.time.time()+offset*86400))
 			string = string[:start] + time_string + string[end+1:]
@@ -428,7 +428,7 @@ class user_template_file:
 			If endstring is empty, end just before toofarstring. '''
 		reset_position = self.position
 		# set the limit
-		if len(toofarstring) > 0:
+		if toofarstring:
 			limit = self.buffer.find(toofarstring, self.position)
 			tryNextLimit = limit
 			while toofarskips > 0 and tryNextLimit > 0:
@@ -440,7 +440,7 @@ class user_template_file:
 		else:
 			limit = 0
 		# search for start string
-		if len(startstring) > 0:
+		if startstring:
 			start = self.buffer.find(startstring, self.position)
 			self.position += len(startstring)
 		else:
@@ -453,7 +453,7 @@ class user_template_file:
 				if end >=0:
 					self.position = end
 					endstring = endstring[wildcard+1:]
-			if len(endstring) == 0 and limit > 0:
+			if limit > 0 and not endstring:
 				end = limit
 			else:
 				end = self.buffer.find(endstring, self.position)
@@ -466,7 +466,6 @@ class user_template_file:
 			end += len(endstring)
 			self.position = end
 			data = self.buffer[start:end]
-			#print data[:20],'...',data[len(data)-20:],self.position
 			return data
 		else:
 			# start and/or end were not found, return nothing
@@ -528,7 +527,7 @@ class incoming_data_source:
 					# end of a field
 					row.append(element)
 					element = ""
-				elif c == quote and len(element) == 0:
+				elif c == quote and not element:
 					within_quote = 1
 				elif c == end_of_line:
 					rows_in += 1
@@ -538,7 +537,7 @@ class incoming_data_source:
 						rows_out += 1
 					element = ""
 					row = []
-				elif c == cr and (databuffer1[i+1] == end_of_line or len(element) == 0):
+				elif c == cr and (databuffer1[i+1] == end_of_line or not element):
 					continue
 				else:
 					element += c
@@ -595,8 +594,8 @@ class merged_data_document:
 				if valuetag >= 0:	# For spreadsheets, fill the "value" tag with the data value
 					valuetag = self.template.header_cellstart[i].find('"', valuetag)
 					valuetag2 = self.template.header_cellstart[i].find('"', valuetag+1)
-					if app.debug: self.output += '{header_cellstart}'
-					self.output += self.template.header_cellstart[i][:valuetag+1]
+					if app.debug: self.output.join('{header_cellstart}')
+					self.output.join(self.template.header_cellstart[i][:valuetag+1])
 					if len(app.dateformat) > 0 and self.template.header_cellstart[i].find('value-type="date"') >= 0:
 						try:
 							self.output += self.time.strftime('%Y-%m-%dT%H:%M:%S',self.time.strptime(self.data.buffer[0][i], app.dateformat))
@@ -632,7 +631,7 @@ class merged_data_document:
 					valuetag2 = self.template.cellstart[j].find('"', valuetag+1)
 					if app.debug: self.output += '{cellstart}'
 					self.output += self.template.cellstart[j][:valuetag+1]
-					if len(app.dateformat) > 0 and self.template.cellstart[j].find('value-type="date"') >= 0:
+					if app.dateformat and self.template.cellstart[j].find('value-type="date"') >= 0:
 						try:
 							self.output += self.time.strftime('%Y-%m-%dT%H:%M:%S',self.time.strptime(self.data.buffer[i][app.order[j]], app.dateformat))
 						except ValueError:
@@ -700,7 +699,7 @@ class merged_data_document:
 		self.filename = filename
 		self.data = data
 		self.template = template
-		if len(app.order) == 0:
+		if not app.order:
 			app.order = range(len(self.data.buffer[0]))
 
 if __name__ == "__main__":
