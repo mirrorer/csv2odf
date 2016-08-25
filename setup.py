@@ -24,7 +24,7 @@
 import distutils.core
 
 distutils.core.setup(name='csv2odf',
-      version='1.07',
+      version='1.08',
       description='Convert csv files to open document format',
       url = 'http://csv2odf.sourceforge.net',
       license='GNU GPL-3',

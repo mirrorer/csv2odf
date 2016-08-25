@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# csv2odf  v1.07
+# csv2odf  v1.08
 # Copyright (C) 2011 Larry Jordan <w322 at users.sourceforge.net>
 
 '''Convert a csv file to odf, ods, html, xlsx,
@@ -49,7 +49,7 @@ def _(string=""):    #support for localization, not yet implemented
 
 class ApplicationInitializer:
 
-    VERSION = "1.07"
+    VERSION = "1.08"
 
     # default properties
     quiet = 0
@@ -97,10 +97,9 @@ class ApplicationInitializer:
         print(_("with -H)  The formatting in the second row of cells will be applied  to"))
         print(_("each data cell of the output file."))
         print(_(""))
-        print(_("If  the template is a spreadsheet, the second row needs to contain some"))
-        print(_("data: cells that may contain letters (not  just  numbers)  should  have"))
-        print(_("letters;  adjacent  cells  should  not  contain  repeated  data or else"))
-        print(_("OpenOffice may merge/compress them."))
+        print(_("If  the  template  is a spreadsheet, the second row should contain some"))
+        print(_("data of similar type to the incoming data  so  that  numbers/text/dates"))
+        print(_("can be correctly identified."))
         print(_(""))
         print(_("If the template is a document, it must contain a  table  that  the  csv"))
         print(_("data  will be inserted into.  If the first table in the file is not the"))
@@ -144,7 +143,8 @@ class ApplicationInitializer:
         print(_(""))
         print(_("-d <fmt>"))
         print(_("       date format within csv data is specified by fmt string,  see  -D"))
-        print(_("       for codes"))
+        print(_("       for  codes.   Identified  dates will be translated to the native"))
+        print(_("       date code."))
         print(_(""))
         print(_("OPTIONS FOR PROCESSING TEMPLATE FILE"))
         print(_("-H     insert the first csv row into the header"))
@@ -263,11 +263,9 @@ class ApplicationInitializer:
             try:
                 n = int(string)
             except ValueError:
-                self.warning(_("Error: ") + string + _(" does not look like a number "))
-                sys.exit(1)
+                self.stop(_("Error: ") + string + _(" does not look like a number "), 1)
             if n < 1:
-                self.warning(_("Error: ") + string + _(" cannot be less than 1 "))
-                sys.exit(1)
+                self.stop(_("Error: ") + string + _(" cannot be less than 1 "), 1)
             return n - 1
         else:
             return None
@@ -314,7 +312,7 @@ class ApplicationInitializer:
                     self.delimiter = a
             elif o == "-d": self.dateformat = a
             elif o == "-V":
-                self.stop("version "+self.VERSION)
+                self.stop(_("version ")+self.VERSION)
             elif o == "-o":
                 self.order = list(map( self.int_minus_1, a.split(",") ))
                 for i in range(len(self.order)):
@@ -408,17 +406,21 @@ class ApplicationInitializer:
                 self.out_file = argument
         if not self.document_file:
             self.stop(_("Error: could not identify the template file in the given arguments."), 1)
+        if self.document_file and self.document_file != "stdin" and not os.path.exists(self.document_file):
+            self.stop(_("Error: file was not found: ")+self.document_file, 1)
+        if self.csv_file and self.csv_file != "stdin" and not os.path.exists(self.csv_file):
+            self.stop(_("Error: file was not found: ")+self.csv_file, 1)
 
     def test_args(self):
         '''Verify required arguments were provided'''
         if not self.csv_file and not self.document_file:
-            self.stop(_("Error: neither csv file nor template file were specified"))
+            self.stop(_("Error: neither csv file nor template file were specified"), 1)
         if not self.csv_file:
             self.csv_file = "stdin"
         if self.csv_file == "stdin" and self.document_file == "stdin":
-            self.stop(_("Error: both csv file and template file cannot come from stdin"))
+            self.stop(_("Error: both csv file and template file cannot come from stdin"), 1)
         if not self.document_file:
-            self.stop(_("Error: template file was not specified"))
+            self.stop(_("Error: template file was not specified"), 1)
         if not self.out_file:
             self.out_file = "stdout"
         if (not self.quiet
@@ -442,7 +444,7 @@ class ApplicationInitializer:
             and not self.document_file == "stdin"
             and not self.extension(self.document_file) in ['html', 'htm'] ):
             self.stop(_("Error: -t option must have a number for files of type ") +
-                self.extension(self.document_file))
+                self.extension(self.document_file), 1)
 
     def __init__(self):
         self.get_args()
@@ -469,32 +471,38 @@ class DocumentProcessor:
             {
             'table': 'table:table',
             'row': ['table:table-row', 'table:table-header-row'],
-            'cellstart': ['table:table-cell']},
+            'cellstart': ['table:table-cell'],
+            'textnode': 'text:p'},
         'odt':
             {
             'table': 'table:table',
             'row': ['table:table-row', 'table:table-header-row'],
-            'cellstart': ['table:table-cell']},
+            'cellstart': ['table:table-cell'],
+            'textnode': 'text:p'},
         'html-table':
             {
             'table': 'table',
             'row': ['tr'],
-            'cellstart': ['th','td']},
+            'cellstart': ['th','td'],
+            'textnode': None},
         'html-div':
             {
             'table': 'div',
             'row': ['div'],
-            'cellstart': ['div']},
+            'cellstart': ['div'],
+            'textnode': 'div'},
         'xlsx':
             {
             'table': 'sheetData',
             'row': ['row'],
-            'cellstart': ['c']},
+            'cellstart': ['c'],
+            'textnode': 'v'},
         'docx':
             {
             'table': 'w:tbl',
             'row': ['w:tr'],
-            'cellstart': ['w:tc']},
+            'cellstart': ['w:tc'],
+            'textnode': 'w:t'},
         }
     shared_string_list = []
     indexed_original_end = 0
@@ -526,7 +534,7 @@ class DocumentProcessor:
             self.doctype = "docx" # process the same as docx
             self.read_docx()
         else:
-            app.stop(_("Error: Could not identify the template file type."))
+            app.stop(_("Error: Could not identify the template file type."), 1)
 
     def read_odf(self):
         '''Read an odf file (either odt or ods) and parse content'''
@@ -534,28 +542,31 @@ class DocumentProcessor:
         self.content = self.read_inner_document(self.inner_filename)
         table = self.element(self.pattern[self.doctype]['table'], app.table)
         firstrow = self.element(self.pattern[self.doctype]['row'], node=table)
-        firstcell = self.element(self.pattern[self.doctype]['cellstart'],
-            node=firstrow).firstChild.firstChild
-        if firstcell and firstcell.data[:8].lower() == 'csv2odf:':  # The first cell contains options
-            app.parse_args(firstcell.data[8:])
-            app.get_args()  # we want command line args to override args in the template, so reload the command line args
-            parent = firstrow.parentNode
-            parent.removeChild(firstrow)
-            firstrow.unlink()
-            self.initial_offset = -1
+        firstcell = self.element(self.pattern[self.doctype]['cellstart'], node=firstrow)
+        if firstcell is not None and firstcell.hasChildNodes:
+            firstcell1 = firstcell.firstChild
+            if firstcell1 is not None and firstcell1.hasChildNodes:
+                firstcell2 = firstcell1.firstChild
+                if firstcell2.data[:8].lower() == 'csv2odf:':  # The first cell contains options
+                    app.parse_args(firstcell2.data[8:])
+                    app.get_args()  # we want command line args to override args in the template, so reload the command line args
+                    parent = firstrow.parentNode
+                    parent.removeChild(firstrow)
+                    firstrow.unlink()
+                    self.initial_offset = -1
 
     def read_html(self):
         '''Read an html file and parse content'''
         if self.filename == "stdin":
             if sys.stdin.isatty():  # do not read from tty (keyboard)
                 if not app.quiet:
-                    app.stop(_("Error: there was no template file specified."))
+                    app.stop(_("Error: there was no template file specified."), 1)
             else:
                 try:
                     buffer = sys.stdin.read()
                     self.content = self.xml.dom.minidom.parseString(buffer)
                 except IOError:
-                    app.stop(_("Error: there was an error while reading template from stdin."))
+                    app.stop(_("Error: there was an error while reading template from stdin."), 1)
         else:
             file = open(self.filename, 'r')
             self.content = self.xml.dom.minidom.parseString(file.read())
@@ -623,12 +634,12 @@ class DocumentProcessor:
         if self.filename == "stdin":
             if sys.stdin.isatty():
                 if not app.quiet:  # do not read from tty (keyboard)
-                    app.stop(_("Error: there was no template file specified."))
+                    app.stop(_("Error: there was no template file specified."), 1)
             else:
                 try:
                     documentfile = self.zipfile.ZipFile(sys.stdin,'r')
                 except IOError:
-                    app.stop(_("Error: there was an error while reading template from stdin."))
+                    app.stop(_("Error: there was an error while reading template from stdin."), 1)
         else:
             documentfile = self.zipfile.ZipFile(self.filename,'r')
         try:
@@ -647,6 +658,7 @@ class DocumentProcessor:
         '''Input:
             data:    an object containing data from the csv file
            Output:   modifies self.content '''
+        no_template = False
         data_row_index = 0 # The data row index, also used as the amount to offset formulas in the cells.
         sheet_row_number = app.rowSkips + 1 # The row number in the sheet
         xlsx_trailing_offset = 1 # The number of row NOT added because they replaced header or template rows.
@@ -656,11 +668,16 @@ class DocumentProcessor:
             table_number = app.table
         table = self.element(self.pattern[self.doctype]['table'], table_number) # extract table
         if table is None:
-            app.stop(_("Error: the table was not found"))
-        header_row = self.element(self.pattern[self.doctype]['row'], app.rowSkips + 1,
-            table, descend=(self.doctype != "html-div")) # extract header
-        if header_row is None:
-            app.stop(_("Error: the first row was not found"))
+            app.stop(_("Error: the table was not found"), 1)
+        template_row_list = []
+        for node in table.childNodes:
+            if node.nodeName in self.pattern[self.doctype]['row']:
+                template_row_list.append(node)
+            elif node.nodeName == 'table:table-header-rows':
+                for header_node in node.childNodes:
+                    if header_node.nodeName in self.pattern[self.doctype]['row']:
+                        template_row_list.append(header_node)
+        header_row = template_row_list[app.rowSkips]
         if app.header_from_csv:  # put the csv header into output header
             merged_header_row = self.merge_row(header_row, data.row(data_row_index),
                 sheet_row_number, data_row_index + self.initial_offset)
@@ -668,26 +685,32 @@ class DocumentProcessor:
             data_row_index += 1
             xlsx_trailing_offset += 1
         try:
-            template_row = self.element(self.pattern[self.doctype]['row'], app.rowSkips + 2,
-                table, descend=(self.doctype != "html-div"))
-        except Exception:
-            app.stop(_("Error: a sample row of data was not found in the template"))
+            template_row = template_row_list[app.rowSkips + 1]
+        except IndexError:
+            no_template = True
+            template_row = self.create_row() #create a blank row
+            table.appendChild(template_row)
         sheet_row_number += 1
-        if not template_row:  # the template row does not exist
-            app.stop(_("Error: A row of sample data was not provided in the template file."), 1)
+        count_list = []
+        for pattern in self.pattern[self.doctype]['cellstart']:  # for html there are multiple patterns, check each one and use the one with the highest count
+            element_list = template_row.getElementsByTagName(pattern)
+            count = 0
+            for element in element_list:  # scan each element in the template row and count the columns
+                if element.hasChildNodes():
+                    if self.doctype in ('ods', 'odt') and element.hasAttribute('table:number-columns-repeated'):
+                        count += int(element.getAttribute('table:number-columns-repeated'))
+                    else:
+                        count += 1
+            count_list.append(count)
+        columns = max(count_list)
         if app.verbose:  # display verbose report
             i = self.filename.rfind('/') + 1
             if i == -1: i = 0
-            count_list = []
-            for pattern in self.pattern[self.doctype]['cellstart']:
-                element_list = template_row.getElementsByTagName(pattern)
-                count = 0
-                for element in element_list:
-                    if element.hasChildNodes():
-                        count += 1
-                count_list.append(count)
-            columns = max(count_list)
             app.warning(self.filename[i:] + _(" has ") + str(columns) + _(" columns."))
+        if not app.quiet and columns < data.columns():
+            app.warning(_("Warning: data has more columns than template."))
+        if not app.quiet and no_template:
+            app.warning(_("Warning: a sample row of data was not found, a default row will be created."))
         # insert the first row of data into the template row
         if app.nodata:
             parent = template_row.parentNode
@@ -702,11 +725,15 @@ class DocumentProcessor:
             insert_point = first_data_row.nextSibling
             sheet_row_number += 1
         for data_row_index in range(data_row_index, data.rows()):
+            if app.verbose:
+                sys.stderr.write("csv2odf: processing row " + str(data_row_index + 1) + " of " + str(data.rows()) + "\r")
             data_row = data.row(data_row_index)
             merged_row = self.merge_row(template_row, data_row,
                 sheet_row_number, data_row_index + self.initial_offset)
             table.insertBefore(merged_row, insert_point)
             sheet_row_number += 1
+        if app.verbose:
+            sys.stderr.write("\n")
         if self.doctype == 'xlsx':  # change the row numbers for remaining rows in xlsx
             increment_row = insert_point
             while increment_row:
@@ -726,17 +753,58 @@ class DocumentProcessor:
             formula_offset:  an integer that is added to formula cell addresses
            Output:           a row of xml cell with csv data merged into it'''
         output_row = template_row.cloneNode(True)
-        for cell_index in range(len(data_row) + app.colSkips):
-            cell = self.element(self.pattern[self.doctype]['cellstart'], cell_index + 1, output_row)
-            if cell is None:  # an empty cell is in the template
-                app.stop(_("Error: There are too few or missing columns in the template file sample data."), 1)
-            data_column = app.order[cell_index]
-            if data_column is None:
-                data_item = ""
+        while output_row.childNodes.length > 0:
+            output_row.removeChild(output_row.lastChild)
+        i = 0
+        for node in template_row.childNodes:
+            new_node = node.cloneNode(True)
+            if new_node.hasChildNodes() and node.nodeName in self.pattern[self.doctype]['cellstart']:
+                if new_node.hasAttribute('table:number-columns-repeated'): # it's a compressed cell, expand it
+                    number_columns_repeated = int(new_node.getAttribute('table:number-columns-repeated'))
+                    new_node.removeAttribute('table:number-columns-repeated')
+                    data_column = app.order[i]
+                    if data_column is None:
+                        data_item = ""
+                    else:
+                        data_item = data_row[data_column]
+                    merged_cell = self.merge_cell(new_node, data_item, sheet_row_number, formula_offset)
+                    output_row.appendChild(merged_cell)
+                    i += 1
+                    for j in range(number_columns_repeated - 1):
+                        additional_node = new_node.cloneNode(True)
+                        data_column = app.order[i]
+                        if data_column is None:
+                            data_item = ""
+                        else:
+                            data_item = data_row[data_column]
+                        merged_cell = self.merge_cell(additional_node, data_item, sheet_row_number, formula_offset)
+                        output_row.appendChild(merged_cell)
+                        i += 1
+                else:
+                    data_column = app.order[i]
+                    if data_column is None:
+                        data_item = ""
+                    else:
+                        data_item = data_row[data_column]
+                    merged_cell = self.merge_cell(new_node, data_item, sheet_row_number, formula_offset)
+                    output_row.appendChild(merged_cell)
+                    i += 1
             else:
-                data_item = data_row[data_column]
-            merged_cell = self.merge_cell(cell, data_item, sheet_row_number, formula_offset)
-            output_row.replaceChild(merged_cell, cell)
+                while self.doctype == 'ods' and i < len(data_row): # there is more data than template cells, append unformatted cells
+                    data_column = app.order[i]
+                    if data_column is None:
+                        output_row.appendChild(create_cell_node("", i+1, sheet_row_number, formula_offset))
+                    else:
+                        output_row.appendChild(create_cell_node(data_row[data_column], i+1, sheet_row_number, formula_offset))
+                    i += 1
+                output_row.appendChild(new_node) # this is where we reinsert the empty placeholder node
+        while i < len(data_row): # there is more data than template cells, append unformatted cells
+            data_column = app.order[i]
+            if data_column is None:
+                output_row.appendChild(self.create_cell_node("", i+1, sheet_row_number, formula_offset))
+            else:
+                output_row.appendChild(self.create_cell_node(data_row[data_column], i+1, sheet_row_number, formula_offset))
+            i += 1
         return output_row
 
     def merge_cell(self, template_cell, data_item, sheet_row_number, formula_offset):
@@ -748,9 +816,11 @@ class DocumentProcessor:
            Output:
             output_cell '''
         if app.debug:
-            app.warning(" in: " + template_cell.toxml())
+            app.warning(_(" in: ") + template_cell.toxml())
         output_cell = template_cell.cloneNode(True)
         if self.doctype == 'ods':
+            if not output_cell.firstChild.hasChildNodes(): # an empty cell is in the template
+                app.stop(_("Error: There are too few or missing columns in the template file sample data."), 1)
             if output_cell.hasAttribute('office:date-value'): # it's a date
                 output_cell.setAttribute('office:date-value', self.format_date(data_item))
                 output_cell.firstChild.firstChild.data = ""  # for a date, leave the cell text empty
@@ -804,10 +874,10 @@ class DocumentProcessor:
                 output_cell.appendChild(self.content.createTextNode(text_line))
         elif self.doctype == 'docx':
             text_line_list = data_item.splitlines()
+            if not text_line_list: text_line_list = [""]
             paragraph = output_cell.getElementsByTagName('w:p')[0]
             text_node = paragraph.getElementsByTagName('w:t')[0]
             paragraph_template = paragraph.cloneNode(True)
-            if not text_line_list: text_line_list = [""]
             text_node.firstChild.data = text_line_list[0]
             for text_line in text_line_list[1:]:
                 last_paragraph = paragraph_template.cloneNode(True)
@@ -817,7 +887,7 @@ class DocumentProcessor:
         else:
             app.stop(_("Error: document type '"+self.doctype+"' is not recognized in merge_cell."), 1)
         if app.debug:
-            app.warning("out: " + output_cell.toxml())
+            app.warning(_("out: ") + output_cell.toxml())
         return output_cell
 
     def element(self, element_name, occurance=1, node=None, descend=1):
@@ -875,6 +945,47 @@ class DocumentProcessor:
             remainder = formula[match.end(1):]
             previous = match.end(1)
         return output + remainder
+
+    def create_row(self, column_number=1, row_number=1, formula_offset=0):
+        new_row = self.content.createElement(self.pattern[self.doctype]['row'][0])
+        new_row.appendChild(self.create_cell_node("", column_number, row_number, formula_offset))
+        return new_row
+
+    def create_cell_node(self, data_item, column_number, row_number, formula_offset):
+        new_cell_node = self.content.createElement(self.pattern[self.doctype]['cellstart'][0])
+        if self.pattern[self.doctype]['textnode'] is None:
+            new_cell_node.appendChild(self.content.createTextNode(data_item))
+        else:
+            new_text_node = self.content.createElement(self.pattern[self.doctype]['textnode'])
+            new_text_node.appendChild(self.content.createTextNode(data_item))
+            new_cell_node.appendChild(new_text_node)
+        if self.doctype == 'xlsx':
+            new_cell_node.setAttribute('t', 's')
+            new_cell_node.setAttribute('r', self.column_letter(column_number)+str(row_number))
+            new_cell_node = self.merge_cell(new_cell_node, data_item, row_number, formula_offset)
+        return new_cell_node
+
+    def column_letter(self, n):
+        LETTER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        if n > 18226:
+            app.stop(_("Error: Cannot handle more than 18226 columns"), 1)
+        first_index = (n-1) // 702 - 1
+        second_index = ((n-1) % 702) // 26 - 1
+        third_index = (n-1) % 26
+        if first_index >= 0:
+            first_letter = LETTER[first_index]
+            second_letter = LETTER[second_index + 1]
+        else:
+            first_letter = ""
+            if second_index >= 0:
+                second_letter = LETTER[second_index]
+            else:
+                second_letter = ""
+        if third_index >= 0:
+            third_letter = LETTER[third_index]
+        else:
+            third_letter = ""
+        return "".join([first_letter, second_letter, third_letter])
 
     def insert_dates_or_comments(self, node=None):
         '''Search nodes for [date] keywords in text, replace with current time.  Descend into child nodes.'''
@@ -979,12 +1090,12 @@ class DocumentProcessor:
             if self.filename == "stdin":
                 if sys.stdin.isatty():
                     if not app.quiet:  # do not read from tty (keyboard)
-                        app.stop(_("Error: there was no template file specified."))
+                        app.stop(_("Error: there was no template file specified."), 1)
                 else:
                     try:
                         documentfile = self.zipfile.ZipFile(sys.stdin,'r')
                     except IOError:
-                        app.stop(_("Error: there was an error while reading template from stdin."))
+                        app.stop(_("Error: there was an error while reading template from stdin."), 1)
             else:
                 documentfile = self.zipfile.ZipFile(self.filename,'r')
             if out_filename == "stdout":  # send the output to stdout
@@ -1089,17 +1200,19 @@ class IncomingDataSource:
 
     def item(self, row, col):
         '''Return a data item at the specified row and column position.'''
-        if row is None or col is None:
-            return None
-        else:
-            return self.buffer[row][col]
+        try:
+            data = self.buffer[row][col]
+        except (IndexError, TypeError):
+            data = None
+        return data
 
     def row(self, row):
         '''Return a row of data.'''
-        if 0 <= row < len(self.buffer):
-            return self.buffer[row]
-        else:
-            return None
+        try:
+            data = self.buffer[row]
+        except (IndexError, TypeError):
+            data = None
+        return data
 
     def rows(self):
         '''Return the number of rows.'''

@@ -1,4 +1,4 @@
-.TH "csv2odf" "1" "Jul 2011" "Larry Jordan" "Text Processing"
+.TH "csv2odf" "1" "Jan 2012" "Larry Jordan" "Text Processing"
 .SH "NAME"
 .LP
 csv2odf \- convert csv files to open document format
@@ -15,7 +15,7 @@ If a csv input file is not specified, input will be taken from standard input (s
 .LP
 The first row of the table will be treated as a header row.  (Override with \-H)  The formatting in the second row of cells will be applied to each data cell of the output file.
 .LP
-If the template is a \fIspreadsheet\fR, the second row needs to contain some data: cells that may contain letters (not just numbers) should have letters; adjacent cells should not contain repeated data or else OpenOffice may merge/compress them.
+If the template is a \fIspreadsheet\fR, the second row should contain some data of similar type to the incoming data so that numbers/text/dates can be correctly identified.
 .LP
 If the template is a \fIdocument\fR, it must contain a table that the csv data will be inserted into.  If the first table in the file is not the target, use the \-t options to identify the table number.
 .LP
@@ -39,7 +39,7 @@ start reading at the nth row of the csv file
 end reading at the nth row of the csv file
 .TP
 \fB\-d\fR <\fIfmt\fR>
-date format within csv data is specified by \fIfmt\fR string, see \-D for codes
+date format within csv data is specified by \fIfmt\fR string, see \-D for codes.  Identified dates will be translated to the native date code.
 .SH "OPTIONS FOR PROCESSING TEMPLATE FILE"
 .TP
 \fB\-H\fR
@@ -162,7 +162,7 @@ Insert data into a spreadsheet:
 .IP
 \fBcsv2odf data.csv template.ods output.ods\fR
 .LP
-Insert data into a text document:
+Insert data into an OpenOffice text document:
 .IP
 \fBcsv2odf data.csv template.odt output.odt\fR
 .LP
