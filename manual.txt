@@ -22,7 +22,7 @@ DESCRIPTION
 
        If a csv input file is not specified, input will be taken from standard
        input  (stdin).   If  an  output  file is not specified, output will be
-       directed to standard output (stdout).  This allow the use of  the  com-
+       directed to standard output (stdout).  This allows the use of the  com-
        mand in pipes.
 
        If  the  template  is a spreadsheet, the first row will be treated as a
@@ -59,6 +59,9 @@ OPTIONS
 
        -c <char>
               use char as delimiter instead of comma
+
+       --comment=<text>
+              replace [csv2odf-comment] within the document with <text>
 
        -o <spec>
               specify column order: 2,1,3 = second csv column is first.   Also
@@ -167,4 +170,4 @@ EXAMPLES
 
 
 
-Larry Jordan                       Mar 2011                         csv2odf(1)
+Larry Jordan                       Jun 2011                         csv2odf(1)

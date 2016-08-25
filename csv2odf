@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# csv2odf  v1.05
+# csv2odf  v1.06
 # Copyright (C) 2011 Larry Jordan <w322 at users.sourceforge.net>
 #
 # csv2odf is free software: you can redistribute it and/or modify
@@ -35,7 +35,7 @@ def _(string=""):	#support for localization, not yet implemented
 
 class ApplicationInitializer:
 
-	VERSION = "1.05"
+	VERSION = "1.06"
 
 	# properties
 	quiet = 0
@@ -57,6 +57,7 @@ class ApplicationInitializer:
 	document_file = ""
 	csv_file = ""
 	out_file = ""
+	comment = ""
 	debug = 0
 
 	def help(self):
@@ -75,7 +76,7 @@ class ApplicationInitializer:
 		print("")
 		print(_("If a csv input file is not specified, input will be taken from standard"))
 		print(_("input  (stdin).   If  an  output  file is not specified, output will be"))
-		print(_("directed to standard output (stdout).  This allow the use of  the  com-"))
+		print(_("directed to standard output (stdout).  This allows the use of  the com-"))
 		print(_("mand in pipes."))
 		print("")
 		print(_("If the template is a spreadsheet, the first row will be  treated  as  a"))
@@ -109,6 +110,8 @@ class ApplicationInitializer:
 		print(_("-H     insert the first csv row into the header"))
 		print(_("-c <char>"))
 		print(_("       use char as delimiter instead of comma"))
+		print(_("--comment=<text>"))
+		print(_("       replace [csv2odf-comment] within the document with <text>"))
 		print(_("-o <spec>"))
 		print(_("       specify  column order: 2,1,3 = second csv column is first.  Also"))
 		print(_("       use to leave the contents of a template column: 1,2,,3,4  =  the"))
@@ -220,7 +223,8 @@ class ApplicationInitializer:
 			arguments = shlex.split(arguments)
 		# else: arguments is alread a list, no action required
 		try:
-			optionlist, argumentlist = getopt.gnu_getopt(arguments, "hHqvxnVzs:t:e:c:Dd:S:o:", ["input=", "template=", "output="])
+			optionlist, argumentlist = getopt.gnu_getopt(arguments, "hHqvxnVzs:t:e:c:Dd:S:o:",
+				["input=", "template=", "output=", "comment="])
 		except getopt.GetoptError:
 			self.warning(_("Error processing arguments, outputting help infomation."))
 			self.help()
@@ -271,6 +275,8 @@ class ApplicationInitializer:
 				self.document_file = a
 			elif o == "--output":
 				self.out_file = a
+			elif o == "--comment":
+				self.comment = a
 			elif o == "-z":
 				self.debug = 1
 			else:
@@ -284,7 +290,8 @@ class ApplicationInitializer:
 			sys.exit(0)
 		#parse and validate arguments
 		for argument in argumentlist:
-			if self.extension(argument) in ('ods', 'odt', 'xlsx', 'docx'):
+			if self.extension(argument) in ('ods', 'odt', 'xlsx', 'docx',
+				'xlsm', 'docm', 'xltx', 'dotx', 'xltm', 'dotm'):
 				if not self.document_file:
 					self.document_file = argument
 				elif not self.out_file:
@@ -309,7 +316,14 @@ class ApplicationInitializer:
 			self.stdout = 1
 		if not self.csv_file:
 			self.stdin = 1
-		if not self.stdout and not self.extension(self.document_file) == self.extension(self.out_file) and not self.quiet and not self.xml:
+		if (not (self.extension(self.document_file) ==  self.extension(self.out_file))
+			and not (self.extension(self.document_file) ==  'xltx' and self.extension(self.out_file) == 'xlsx')
+			and not (self.extension(self.document_file) ==  'xltm' and self.extension(self.out_file) == 'xlsm')
+			and not (self.extension(self.document_file) ==  'dotx' and self.extension(self.out_file) == 'docx')
+			and not (self.extension(self.document_file) ==  'dotm' and self.extension(self.out_file) == 'docm')
+			and not self.stdout
+			and not self.quiet
+			and not self.xml):
 			self.warning(_("Warning: The template and output files should be of the same type. ") + "(" + self.extension(self.document_file) + ' vs ' + self.extension(self.out_file)+")")
 		if not os.path.exists(self.document_file): self.stop(_("Error: file was not found: ")+self.document_file, 1)
 		if (not self.stdin) and (not os.path.exists(self.csv_file)):
@@ -371,6 +385,12 @@ class DocumentProcessor:
 		elif self.doctype == "xlsx":
 			self.read_xlsx()
 		elif self.doctype == "docx":
+			self.read_docx()
+		elif self.doctype in ("xlsm", "xltx", "xltm"):
+			self.doctype = "xlsx" # process the same as xlsx
+			self.read_xlsx()
+		elif self.doctype in ("docm", "dotx", "dotm"):
+			self.doctype = "docx" # process the same as docx
 			self.read_docx()
 		else:
 			app.stop(_("Error: Could not identify the template file type."))
@@ -496,7 +516,7 @@ class DocumentProcessor:
 			if i == -1: i = 0
 			app.warning(self.filename[i:] + _(" has ") + str(len(template_row.getElementsByTagName(self.pattern[self.doctype]['cellstart']))-1) + _(" columns."))
 		# insert the first row of data into the template row
-		first_data_row = self.merge_row(template_row.cloneNode(True), data.row(data_row_index), sheet_row_number, data_row_index + self.initial_offset)
+		first_data_row = self.merge_row(template_row, data.row(data_row_index), sheet_row_number, data_row_index + self.initial_offset)
 		table.replaceChild(first_data_row, template_row)
 		data_row_index += 1
 		# insert the remaining rows of data as new rows
@@ -536,8 +556,9 @@ class DocumentProcessor:
 
 	def merge_cell(self, template_cell, data_item, sheet_row_number, formula_offset):
 		# Inputs:
-		#	template_cell	a single cell used as the template, formatting is copied
-		#	data_item		a string that will replace the text payload in the template_cell
+		#	template_cell		a single cell used as the template, formatting is copied
+		#	data_item			a string that will replace the text payload in the template_cell
+		#	sheet_row_number	the row number were the cell will be placed
 		#	formula_offset		an integer that is added to formula cell addresses
 		# Output:
 		#	output_cell
@@ -557,22 +578,39 @@ class DocumentProcessor:
 		if output_cell.hasAttribute('r'):
 			col_letter = ''.join(self.re.findall('[A-Z]', output_cell.getAttribute('r')))
 			output_cell.setAttribute('r', col_letter+str(sheet_row_number))
-		if output_cell.hasAttribute('office:date-value'):
+		if output_cell.hasAttribute('office:date-value'): # it's a date
 			output_cell.setAttribute('office:date-value', self.format_date(data_item))
-			output_cell.firstChild.firstChild.data = ""  # if it's a date, leave the cell text empty
-		elif output_cell.hasAttribute('t') and output_cell.getAttribute('t') == 's':
-			if self.shared_string_list[int(output_cell.firstChild.firstChild.data)].lower() == 'csv2odf-date':
-				output_cell.firstChild.firstChild.data = self.format_date(data_item)
-				output_cell.setAttribute('t', 'n')
-			else:
-				index = str(len(self.shared_string_list))
-				self.shared_string_list.append(data_item)
-				output_cell.firstChild.firstChild.data = index
-		elif output_cell.tagName == 'w:tc':  # it's a docx cell
-			text_tag = output_cell.getElementsByTagName('w:t')[0]
-			text_tag.firstChild.data = data_item
+			output_cell.firstChild.firstChild.data = ""  # for a date, leave the cell text empty
+		elif output_cell.hasAttribute('t') and output_cell.getAttribute('t') == 's':  # it's an xlsx cell
+			index = str(len(self.shared_string_list))
+			self.shared_string_list.append(data_item)
+			output_cell.firstChild.firstChild.data = index
+		elif self.doctype in ('ods', 'xlsx'):
+			output_cell.firstChild.firstChild.data = data_item
+		elif self.doctype == 'odt':
+			text_line_list = data_item.splitlines()
+			paragraph = output_cell.firstChild
+			paragraph_template = paragraph.cloneNode(True)
+			if not text_line_list: text_line_list = [""]
+			paragraph.firstChild.data = text_line_list[0]
+			for text_line in text_line_list[1:]:
+				last_paragraph = paragraph_template.cloneNode(True)
+				last_paragraph.firstChild.data = text_line  # put the value in the cell text
+				output_cell.appendChild(last_paragraph)
+		elif self.doctype == 'docx':
+			text_line_list = data_item.splitlines()
+			paragraph = output_cell.getElementsByTagName('w:p')[0]
+			text_node = paragraph.getElementsByTagName('w:t')[0]
+			paragraph_template = paragraph.cloneNode(True)
+			if not text_line_list: text_line_list = [""]
+			text_node.firstChild.data = text_line_list[0]
+			for text_line in text_line_list[1:]:
+				last_paragraph = paragraph_template.cloneNode(True)
+				text_node = last_paragraph.getElementsByTagName('w:t')[0]
+				text_node.firstChild.data = text_line
+				output_cell.appendChild(last_paragraph)
 		else:
-			output_cell.firstChild.firstChild.data = data_item  # if it's not a date, put the value in the cell text
+			app.stop(_("Error: document type '"+self.doctype+"' is not recognized in merge_cell."), 1)
 		if app.debug:
 			app.warning("out: " + output_cell.toxml())
 		return output_cell
@@ -634,28 +672,31 @@ class DocumentProcessor:
 			previous = match.end(1)
 		return output + remainder
 
-	def insert_dates(self, node=None):
+	def insert_dates_or_comments(self, node=None):
 		'''Search nodes for [date] keywords in text, replace with current time.  Descend into child nodes.'''
 		if node is None: # a node was not provided, use root of document content
 			node = self.content
 		if self.doctype == 'xlsx':
 			for index, string in enumerate(self.shared_string_list):
-				string = self.insert_date(string)
+				string = self.insert_date_or_comment(string)
 				self.shared_string_list[index] = string
 		else:
 			for child in node.childNodes:
 				if child.nodeType == self.content.TEXT_NODE:
-					child.data = self.insert_date(child.data)
+					child.data = self.insert_date_or_comment(child.data)
 				if child.hasChildNodes():
-					self.insert_dates(child)
+					self.insert_dates_or_comments(child)
 
-	def insert_date(self, string):
+	def insert_date_or_comment(self, string):
 		'''Searches for a date tag like [date]
 		or a date tag with a format like [date %Y-%m-%d]
 		or a date tag with an offset like [date-1] in days
-		and replaces it with the local date. '''
+		and replaces it with the local date.
+		Also search for [csv2odf-comment] and replace with self.comment.'''
 		if string is None:
 			return None
+		pattern = self.re.compile("\[csv2odf-comment\]", self.re.IGNORECASE)
+		string = pattern.sub(app.comment, string) # replace '[csv2odf-comment]' with app.comment
 		position = 0
 		start = string.lower().find("[date", position)
 		position = start
@@ -800,6 +841,7 @@ class IncomingDataSource:
 			if sys.stdin.isatty():
 				if not app.quiet:
 					app.warning(_("Warning: there was no csv file specified, output will have no data added."))
+					databuffer1 = ""
 			else:
 				try:
 					databuffer1 = sys.stdin.read()
@@ -821,7 +863,10 @@ class IncomingDataSource:
 		for i in range(len(databuffer1)):
 			c = databuffer1[i]
 			if within_quote:
-				if c == quote and ( databuffer1[i+1] in (app.delimiter, end_of_line) or i+1 == len(databuffer1) or (databuffer1[i+1]==cr and databuffer1[i+2]==end_of_line) ):
+				if c == quote and (
+					i+1 >= len(databuffer1)
+					or databuffer1[i+1] in (app.delimiter, end_of_line)
+					or (databuffer1[i+1]==cr and databuffer1[i+2]==end_of_line) ):
 					# This quote is at the end of the field, exit within_quote mode
 					within_quote = 0
 				elif c == quote and databuffer1[i+1] == quote:
@@ -849,6 +894,13 @@ class IncomingDataSource:
 				else:
 					element += c
 		#-----------------
+		if rows_out==0 and not app.quiet:   # no correct rows were found, give a warning
+			i = self.filename.rfind('/') + 1
+			if i == -1: i = 0
+			if len(databuffer1) == 0:
+				app.warning(_("Warning: ") + self.filename[i:] + _(" is empty."))
+			else:
+				app.warning(_("Warning: ") + self.filename[i:] + _(" is malformed."))
 		if app.verbose:
 			# display verbose report
 			if app.stdin:
@@ -897,7 +949,7 @@ if __name__ == "__main__":
 	app = ApplicationInitializer()
 	document = DocumentProcessor(app.document_file)
 	app.test_args()  # open the document before testing the args because args can be embedded in the document
-	document.insert_dates()
+	document.insert_dates_or_comments()
 	data = IncomingDataSource(app.csv_file)
 	if not app.nodata:
 		if not app.order: # if no order was specified, setup the default
