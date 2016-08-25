@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# csv2odf  v1.10
+# csv2odf  v1.10b
 # Copyright (C) 2014 Larry Jordan <w322 at users.sourceforge.net>
 
 '''Convert a csv file to odf, ods, html, xlsx,
@@ -49,7 +49,7 @@ def _(string=""):    #support for localization, not yet implemented
 
 class ApplicationInitializer:
 
-    VERSION = "1.10"
+    VERSION = "1.10b"
 
     # default properties
     quiet = 0
@@ -636,7 +636,10 @@ class DocumentProcessor:
         self.string_file = self.read_inner_document("xl/sharedStrings.xml")
         for string_item in self.string_file.getElementsByTagName('si'):
             text_tag = string_item.getElementsByTagName('t')[0]
-            self.shared_string_list.append(text_tag.firstChild.data)
+            if text_tag.hasChildNodes():
+                self.shared_string_list.append(text_tag.firstChild.data)
+            else:
+                self.shared_string_list.append("")
         self.indexed_original_end = len(self.shared_string_list)
         self.initial_offset = 0
         # check for arguments in the template file
@@ -982,7 +985,8 @@ class DocumentProcessor:
                 cell_value.firstChild.data = index
             else:
                 cell_value = self.element('v', node=output_cell)
-                cell_value.firstChild.data = data_item
+                if cell_value:
+                    cell_value.firstChild.data = data_item
             if output_cell.hasAttribute('r'):
                 col_letter = ''.join(self.re.findall('[A-Z]', output_cell.getAttribute('r')))
                 output_cell.setAttribute('r', col_letter+str(sheet_row_number))
