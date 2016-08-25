@@ -1,3 +1,10 @@
+csv2odf (2.00) unstable; urgency=low
+
+  * Ability to handle large data files using less memory.
+  * The date tag has changed to [csv2odf-date].
+
+ -- Larry Jordan <w322@users.sourceforge.net>  Thu, 31 Jul 2014 12:00:00 +0000
+
 csv2odf (1.11) unstable; urgency=low
 
   * Bugfix to handle blank cells more cleanly.
