@@ -1,3 +1,13 @@
+csv2odf (1.07) unstable; urgency=low
+
+  * Added support for html files (html, htm)
+  * Added option to support reading of the template from stdin
+  * Improved support for tab delimiters
+  * Modified to use Python csv module for reading data files
+  * Added support for tsv (tab seperated values) data file extension
+
+ -- Larry Jordan <w322@users.sourceforge.net>  26 Sep 2011 12:00:00 +0000
+
 csv2odf (1.06) unstable; urgency=low
 
   * Added ability to handle these file extensions: docm, xlsm, dotx, xltx, dotm, xltm.

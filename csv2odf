@@ -1,9 +1,23 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-#
-# csv2odf  v1.06
+
+# csv2odf  v1.07
 # Copyright (C) 2011 Larry Jordan <w322 at users.sourceforge.net>
-#
+
+'''Convert a csv file to odf, ods, html, xlsx,
+ or docx format.  csv2odf is a command line tool that
+ can convert a comma separated value (csv) file to an
+ odf, ods, html, xlsx, or docx document that can be viewed
+ in OpenOffice.org and other office productivity
+ programs. csv2odf is useful for creating reports from
+ databases and other data sources that produce csv files.
+ csv2odf can be combined with cron and shell scripts
+ to automatically generate business reports.
+
+ The output format (fonts, number formatting, etc.) is
+ controlled by a template file that you design in
+ OpenOffice.org.'''
+
 # csv2odf is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
@@ -19,942 +33,1104 @@
 #
 
 # Objects:
-# Instance		Type
-# --------		-----------------------
-# app			ApplicationInitializer
-# document		DocumentProcessor
-# data			IncomingDataSource
+# Instance   Type
+# --------   -----------------------
+# app        ApplicationInitializer
+# document   DocumentProcessor
+# data       IncomingDataSource
 
 import getopt
 import shlex
 import sys
 import os
 
-def _(string=""):	#support for localization, not yet implemented
-	return string
+def _(string=""):    #support for localization, not yet implemented
+    return string
 
 class ApplicationInitializer:
 
-	VERSION = "1.06"
+    VERSION = "1.07"
 
-	# properties
-	quiet = 0
-	verbose = 0
-	showhelp = 0
-	xml = 0
-	nodata = 0
-	stdin = 0
-	stdout = 0
-	start = 0
-	end = 0
-	header_from_csv = 0
-	colSkips = 0
-	rowSkips = 0
-	table = 1
-	delimiter = ','
-	dateformat = ""
-	order = []
-	document_file = ""
-	csv_file = ""
-	out_file = ""
-	comment = ""
-	debug = 0
+    # default properties
+    quiet = 0
+    verbose = 0
+    showhelp = 0
+    xml = 0
+    div = 0
+    nodata = 0
+    doctype = ""
+    start = 1
+    end = None
+    header_from_csv = 0
+    colSkips = 0
+    rowSkips = 0
+    table = 1
+    delimiter = ','
+    dateformat = ""
+    order = []
+    document_file = ""
+    csv_file = ""
+    out_file = ""
+    comment = ""
+    debug = 0
 
-	def help(self):
-		print(_("USAGE: csv2odf [OPTION] [CSV] TEMPLATE [OUTPUT]"))
-		print("")
-		print(_("csv2odf is a command line tool that can convert a comma seperated value"))
-		print(_("(csv) file into an ods, odt, xlsx, or docx document.  csv2odf is useful"))
-		print(_("for creating reports from databases and other data sources that produce"))
-		print(_("csv files.  csv2odf can be combined with  cron  and  shell  scripts  to"))
-		print(_("automatically generate business reports."))
-		print("")
-		print(_("The csv data is merged with a template file to produce the output file."))
-		print(_("The template is a document file as produced by OpenOffice.org or  Word."))
-		print(_("The  template  can be a spreadsheet file (ods or xlsx) or document file"))
-		print(_("(odt or docx)."))
-		print("")
-		print(_("If a csv input file is not specified, input will be taken from standard"))
-		print(_("input  (stdin).   If  an  output  file is not specified, output will be"))
-		print(_("directed to standard output (stdout).  This allows the use of  the com-"))
-		print(_("mand in pipes."))
-		print("")
-		print(_("If the template is a spreadsheet, the first row will be  treated  as  a"))
-		print(_("header row.  (Override with -H)  The formatting in the second row cells"))
-		print(_("will be applied to each data cell of the output file.  In a spreadsheet"))
-		print(_("template,  the  second  row  needs to contain some data: cells that may"))
-		print(_("contain letters (not just numbers) should have letters; adjacent  cells"))
-		print(_("should  not contain repeated data or else OpenOffice may merge/compress"))
-		print(_("them."))
-		print("")
-		print(_("If  the  template  is  a document, it must contain a table that the csv"))
-		print(_("data will be inserted into.  The table will be processed the same as  a"))
-		print(_("spreadsheet."))
-		print("")
-		print(_("In  the  header  or footer of the template, you can insert a [date] tag"))
-		print(_('(the word "date" enclosed in brackets).  The date tag will be  replaced'))
-		print(_("by the current date.  The date format can be changed using format codes"))
-		print(_("(see below), for example [date  %Y-%m-%d]  will  produce  a  date  like"))
-		print(_("2008-02-04.  A date with a day offset from the current date can be cre-"))
-		print(_("ated by using +n or -n, for example  [date-1]  would  insert  the  date"))
-		print(_("before today."))
-		print("")
-		print(_("The  options  may  be  placed  in  the  template file.  To do this, put"))
-		print(_('"csv2odf:" (without qoutes) followed by the options in the  first  cell'))
-		print(_("(cell  A1).   Note  the  first  row  will  be  deleted when it contains"))
-		print(_("options."))
-		print("")
-		print(_("OPTIONS"))
-		print(_("-h     displays help information"))
-		print(_("-v     verbose mode"))
-		print(_("-H     insert the first csv row into the header"))
-		print(_("-c <char>"))
-		print(_("       use char as delimiter instead of comma"))
-		print(_("--comment=<text>"))
-		print(_("       replace [csv2odf-comment] within the document with <text>"))
-		print(_("-o <spec>"))
-		print(_("       specify  column order: 2,1,3 = second csv column is first.  Also"))
-		print(_("       use to leave the contents of a template column: 1,2,,3,4  =  the"))
-		print(_("       3rd template column is not overwritten.  Useful if a column con-"))
-		print(_("       tains a formula.  The formula cell references will be offset  to"))
-		print(_("       the correct row."))
-		print(_("-s <n> start reading at the nth row of the csv file"))
-		print(_("-e <n> end reading at the nth row of the csv file"))
-		print(_("-S <n> skip  the  first n rows of the template file, the header will"))
-		print(_("       be the next row after those skipped"))
-		print(_("-t <n> specify which tab or table to add data to, default first table"))
-		print(_("-d <fmt>"))
-		print(_("       date format within csv data is specified by fmt string, see -D"))
-		print(_("       for codes"))
-		print(_("-D     show a list of date format codes"))
-		print(_("-q     suppress all warning messages"))
-		print(_("-x     create an xml output file instead of odf"))
-		print(_("-n     do not  merge the  data into output, "))
-		print(_("          use with -x to extract template xml codes"))
-		print(_("--input=<file>"))
-		print(_("       specify the csv data file location"))
-		print(_("--template=<file>"))
-		print(_("       specify the tempate file location"))
-		print(_("--output=<file>"))
-		print(_("       specify the output file location"))
-		print(_("-V     display version number"))
-		print(_("-z     display debugging information"))
+    def help(self):
+        print(_("Usage: csv2odf [option] [<csvfile>] <templatefile> [<outputfile>]"))
+        print(_(""))
+        print(_("csv2odf is a command line tool that can convert a comma seperated value"))
+        print(_("(csv) file into an ods, odt, html, xlsx, or docx document.  csv2odf  is"))
+        print(_("useful  for creating reports from databases and other data sources that"))
+        print(_("produce csv files.  csv2odf can be combined with cron and shell scripts"))
+        print(_("to automatically generate business reports."))
+        print(_(""))
+        print(_("The csv data is merged with a template file to produce the output file."))
+        print(_("The template is a document file as produced by OpenOffice.org or  Word,"))
+        print(_("or an html file.  The template can be a spreadsheet file (ods or xlsx),"))
+        print(_("a document file (odt or docx), or an html file."))
+        print(_(""))
+        print(_("If a csv input file is not specified, input will be taken from standard"))
+        print(_("input  (stdin).   If  an  output  file is not specified, output will be"))
+        print(_("directed to standard output (stdout).  This allows the use of the  com-"))
+        print(_("mand in pipes."))
+        print(_(""))
+        print(_("The  first row of the table will be treated as a header row.  (Override"))
+        print(_("with -H)  The formatting in the second row of cells will be applied  to"))
+        print(_("each data cell of the output file."))
+        print(_(""))
+        print(_("If  the template is a spreadsheet, the second row needs to contain some"))
+        print(_("data: cells that may contain letters (not  just  numbers)  should  have"))
+        print(_("letters;  adjacent  cells  should  not  contain  repeated  data or else"))
+        print(_("OpenOffice may merge/compress them."))
+        print(_(""))
+        print(_("If the template is a document, it must contain a  table  that  the  csv"))
+        print(_("data  will be inserted into.  If the first table in the file is not the"))
+        print(_("target, use the -t options to identify the table number."))
+        print(_(""))
+        print(_("If the template is an html file, it must contain a table that  the  csv"))
+        print(_("data  will be inserted into.  If the first table in the file is not the"))
+        print(_("target, use the -t options to identify the table  number  or  table  id"))
+        print(_("property.  The table may be made using div tags if the --div options is"))
+        print(_("used, in which case a div tag must enclose each cell, each row, and the"))
+        print(_("entire table."))
+        print(_(""))
+        print(_("In  the  header  or footer of the template, you can insert a [date] tag"))
+        print(_("(the word \"date\" enclosed in brackets).  The date tag will be  replaced"))
+        print(_("by the current date.  The date format can be changed using format codes"))
+        print(_("(see below), for example [date  %Y-%m-%d]  will  produce  a  date  like"))
+        print(_("2008-02-04.  A date with a day offset from the current date can be cre-"))
+        print(_("ated by using +n or -n, for example  [date-1]  would  insert  the  date"))
+        print(_("before today."))
+        print(_(""))
+        print(_("The  options  may  be  placed  in  the  template file.  To do this, put"))
+        print(_("\"csv2odf:\" (without quotes) followed by the options in the  first  cell"))
+        print(_("(cell  A1).   Note  the  first  row  will  be  deleted when it contains"))
+        print(_("options."))
+        print(_(""))
+        print(_("OPTIONS FOR PROCESSING CSV DATA FILE"))
+        print(_("-c <char>"))
+        print(_("       use char as delimiter instead of comma.  \\t will indicate a tab"))
+        print(_("       as the dilimiter."))
+        print(_(""))
+        print(_("-o <spec>"))
+        print(_("       specify column order: 2,1,3 = second csv column is first.   Also"))
+        print(_("       use  to  leave the contents of a template column: 1,2,,3,4 = the"))
+        print(_("       3rd template column is not overwritten.  Useful if a column con-"))
+        print(_("       tains  a formula.  The formula cell references will be offset to"))
+        print(_("       the correct row."))
+        print(_(""))
+        print(_("-s <n> start reading at the nth row of the csv file"))
+        print(_(""))
+        print(_("-e <n> end reading at the nth row of the csv file"))
+        print(_(""))
+        print(_("-d <fmt>"))
+        print(_("       date format within csv data is specified by fmt string,  see  -D"))
+        print(_("       for codes"))
+        print(_(""))
+        print(_("OPTIONS FOR PROCESSING TEMPLATE FILE"))
+        print(_("-H     insert the first csv row into the header"))
+        print(_(""))
+        print(_("--comment=<text>"))
+        print(_("       replace [csv2odf-comment] within the document with <text>"))
+        print(_(""))
+        print(_("-S <n> skip  the  first n rows of the template file, the header will be"))
+        print(_("       the next row after those skipped"))
+        print(_(""))
+        print(_("-t <n> specify which tab or table to add data to, default first  table."))
+        print(_("       For  html  files, -t may be followed by a name to match to table"))
+        print(_("       id property."))
+        print(_(""))
+        print(_("--div  Search  for  <div>  tags  instead  of <table> (html files only)."))
+        print(_("       <div> tags must be nested with levels for table, row, and cell."))
+        print(_(""))
+        print(_("--template-stdin-ods"))
+        print(_("       The template will be passed to std-in and it's  format  will  be"))
+        print(_("       ods"))
+        print(_(""))
+        print(_("--template-stdin-odt"))
+        print(_("       The  template  will  be passed to std-in and it's format will be"))
+        print(_("       odt"))
+        print(_(""))
+        print(_("--template-stdin-html"))
+        print(_("       The template will be passed to std-in and it's  format  will  be"))
+        print(_("       html"))
+        print(_(""))
+        print(_("--template-stdin-xlsx"))
+        print(_("       The  template  will  be passed to std-in and it's format will be"))
+        print(_("       xlsx"))
+        print(_(""))
+        print(_("--template-stdin-docx"))
+        print(_("       The template will be passed to std-in and it's  format  will  be"))
+        print(_("       docx"))
+        print(_(""))
+        print(_("GENERAL OPTIONS"))
+        print(_("-h     displays help information"))
+        print(_(""))
+        print(_("-v     verbose mode"))
+        print(_(""))
+        print(_("-D     show a list of date format codes (see below)"))
+        print(_(""))
+        print(_("-q     suppress all warning messages"))
+        print(_(""))
+        print(_("-x     create an xml output file instead of odf"))
+        print(_(""))
+        print(_("-n     do  not  merge the data into output, use with -x to extract tem-"))
+        print(_("       plate xml codes"))
+        print(_(""))
+        print(_("--input=<file>"))
+        print(_("       specify the csv data file location"))
+        print(_(""))
+        print(_("--template=<file>"))
+        print(_("       specify the tempate file location"))
+        print(_(""))
+        print(_("--output=<file>"))
+        print(_("       specify the output file location"))
+        print(_(""))
+        print(_("-V     display version number"))
+        print(_(""))
+        print(_("-z     display debugging information"))
 
-	def datehelp(self):
-		print(_("These codes may be used with the -d option."))
-		print(_("%a     Locale's abbreviated weekday name."))
-		print(_("%A     Locale's full weekday name."))
-		print(_("%b     Locale's abbreviated month name."))
-		print(_("%B     Locale's full month name."))
-		print(_("%c     Locale's appropriate date and time representation."))
-		print(_("%d     Day of the month as a decimal number [01,31]."))
-		print(_("%H     Hour (24-hour clock) as a decimal number [00,23]."))
-		print(_("%I     Hour (12-hour clock) as a decimal number [01,12]."))
-		print(_("%j     Day of the year as a decimal number [001,366]."))
-		print(_("%m     Month as a decimal number [01,12]."))
-		print(_("%M     Minute as a decimal number [00,59]."))
-		print(_("%p     Locale's equivalent of either AM or PM."))
-		print(_("%S     Second as a decimal number [00,61]."))
-		print(_("%U     Week number of the year (Sunday as the first day of the week)"))
-		print(_("          as a decimal number [00,53]. All days in a new year preceding"))
-		print(_("          the first Sunday are considered to be in week 0"))
-		print(_("%w     Weekday as a decimal number [0(Sunday),6]."))
-		print(_("%W     Week number of the year (Monday as the first day of the week)"))
-		print(_("          as a decimal number [00,53]. All days in a new year preceding"))
-		print(_("          the first Monday are considered to be in week 0."))
-		print(_("%x     Locale's appropriate date representation."))
-		print(_("%X     Locale's appropriate time representation."))
-		print(_("%y     Year without century as a decimal number [00,99]."))
-		print(_("%Y     Year with century as a decimal number."))
-		print(_("%Z     Time zone name (no characters if no time zone exists)."))
-		print(_('%%     A literal "%" character.'))
+    def datehelp(self):
+        '''Display codes for use with -d option'''
+        print(_("These codes may be used with the -d option."))
+        print(_("%a     Locale's abbreviated weekday name."))
+        print(_("%A     Locale's full weekday name."))
+        print(_("%b     Locale's abbreviated month name."))
+        print(_("%B     Locale's full month name."))
+        print(_("%c     Locale's appropriate date and time representation."))
+        print(_("%d     Day of the month as a decimal number [01,31]."))
+        print(_("%H     Hour (24-hour clock) as a decimal number [00,23]."))
+        print(_("%I     Hour (12-hour clock) as a decimal number [01,12]."))
+        print(_("%j     Day of the year as a decimal number [001,366]."))
+        print(_("%m     Month as a decimal number [01,12]."))
+        print(_("%M     Minute as a decimal number [00,59]."))
+        print(_("%p     Locale's equivalent of either AM or PM."))
+        print(_("%S     Second as a decimal number [00,61]."))
+        print(_("%U     Week number of the year (Sunday as the first day of the week)"))
+        print(_("          as a decimal number [00,53]. All days in a new year preceding"))
+        print(_("          the first Sunday are considered to be in week 0"))
+        print(_("%w     Weekday as a decimal number [0(Sunday),6]."))
+        print(_("%W     Week number of the year (Monday as the first day of the week)"))
+        print(_("          as a decimal number [00,53]. All days in a new year preceding"))
+        print(_("          the first Monday are considered to be in week 0."))
+        print(_("%x     Locale's appropriate date representation."))
+        print(_("%X     Locale's appropriate time representation."))
+        print(_("%y     Year without century as a decimal number [00,99]."))
+        print(_("%Y     Year with century as a decimal number."))
+        print(_("%Z     Time zone name (no characters if no time zone exists)."))
+        print(_('%%     A literal "%" character.'))
 
-	def stop(self, message="", errnum=0):
-		'''Terminate the program with a message.'''
-		if message:
-			sys.stderr.write("csv2odf: " + message + "\n")
-		sys.exit(errnum)
+    def stop(self, message="", errnum=0):
+        '''Terminate the program with a message.'''
+        if message:
+            sys.stderr.write("csv2odf: " + message + "\n")
+        sys.exit(errnum)
 
-	def warning(self, message=""):
-		'''Dislay a message and continue.'''
-		sys.stderr.write("csv2odf: " + message + "\n")
+    def warning(self, message=""):
+        '''Display a message and continue.'''
+        sys.stderr.write("csv2odf: " + message + "\n")
 
-	def extension(self, string):
-		'''Return the file type part of the file name.'''
-		dot = string.rfind(".")
-		if dot > 0:
-			return string[dot+1:]
-		else:
-			return ""
+    def extension(self, string):
+        '''Return the file type part of the file name.'''
+        dot = string.rfind(".")
+        if dot > 0:
+            return string[dot+1:]
+        else:
+            return ""
 
-	def int_minus_1(self, string):
-		'''Converts a string to an integer and subtracts 1. '''
-		if string:
-			try:
-				n = int(string)
-			except ValueError:
-				self.warning(_("Error: ") + string + _(" does not look like a number "))
-				sys.exit(1)
-			if n < 1:
-				self.warning(_("Error: ") + string + _(" cannot be less than 1 "))
-				sys.exit(1)
-			return n - 1
-		else:
-			return None
+    def int_minus_1(self, string):
+        '''Converts a string to an integer and subtracts 1. '''
+        if string:
+            try:
+                n = int(string)
+            except ValueError:
+                self.warning(_("Error: ") + string + _(" does not look like a number "))
+                sys.exit(1)
+            if n < 1:
+                self.warning(_("Error: ") + string + _(" cannot be less than 1 "))
+                sys.exit(1)
+            return n - 1
+        else:
+            return None
 
-	def get_args(self):
-		'''get command line arguments'''
-		arguments = sys.argv[1:]
-		if arguments:
-			self.parse_args(arguments)
-		else:
-			self.warning(_("No arguments provided, outputting help infomation."))
-			self.help()
-			sys.exit(0)
+    def get_args(self):
+        '''get command line arguments'''
+        arguments = sys.argv[1:]
+        if arguments:
+            self.parse_args(arguments)
+        else:
+            self.warning(_("No arguments provided, outputting help infomation."))
+            self.help()
+            sys.exit(0)
 
-	def parse_args(self, arguments):
-		'''parse arguments'''
-		EN_DASH = '–'
-		if type(arguments) is str:  # if arguments is a string, split it into a list.
-			arguments = arguments.replace(EN_DASH, '--')  # openoffice may sometimes replace a double-dash with an en-dash (unicode 2013), change it to double-dash.
-			arguments = shlex.split(arguments)
-		elif sys.version_info[0] == 2 and type(arguments) is unicode:  # if arguments is a unicode string, split it into a list.
-			arguments = arguments.replace(EN_DASH.decode('utf-8'), '--').encode()  # openoffice may sometimes replace a double-dash with an en-dash (unicode 2013), change it to double-dash.
-			arguments = shlex.split(arguments)
-		# else: arguments is alread a list, no action required
-		try:
-			optionlist, argumentlist = getopt.gnu_getopt(arguments, "hHqvxnVzs:t:e:c:Dd:S:o:",
-				["input=", "template=", "output=", "comment="])
-		except getopt.GetoptError:
-			self.warning(_("Error processing arguments, outputting help infomation."))
-			self.help()
-			sys.exit(1)
-		for o, a in optionlist:
-			if o == "-h": self.showhelp = 1
-			elif o == "-q": self.quiet = 1
-			elif o == "-v": self.verbose = 1
-			elif o == "-x": self.xml = 1
-			elif o == "-n": self.nodata = 1
-			elif o == "-c": self.delimiter = a
-			elif o == "-d": self.dateformat = a
-			elif o == "-V":
-				self.stop("version "+self.VERSION)
-			elif o == "-o":
-				self.order = list(map( self.int_minus_1, a.split(",") ))
-				for i in range(len(self.order)):
-					if self.order[i] is None:
-						self.colSkips += 1
-			elif o == "-D":
-				self.warning(_("outputting help for date codes."))
-				self.datehelp()
-				sys.exit(0)
-			elif o == "-H": self.header_from_csv = 1
-			elif o == "-s":
-				try:
-					self.start = int(a)
-				except ValueError:
-					self.stop(_("Error: ")+a+_(" does not look like a number"), 1)
-			elif o == "-S":
-				try:
-					self.rowSkips = int(a)
-				except ValueError:
-					self.stop(_("Error: ")+a+_(" does not look like a number"), 1)
-			elif o == "-t":
-				try:
-					self.table = int(a)
-				except ValueError:
-					self.stop(_("Error: ")+a+_(" does not look like a number"), 1)
-			elif o == "-e":
-				try:
-					self.end = int(a)
-				except ValueError:
-					self.stop(_("Error: ")+a+_(" does not look like a number"), 1)
-			elif o == "--input":
-				self.csv_file = a
-			elif o == "--template":
-				self.document_file = a
-			elif o == "--output":
-				self.out_file = a
-			elif o == "--comment":
-				self.comment = a
-			elif o == "-z":
-				self.debug = 1
-			else:
-				self.stop(_("Error: Unrecognized option "+o), 1)
-		if self.showhelp:
-			self.warning(_("Outputting help infomation."))
-			self.help()
-			if argumentlist and not self.quiet:
-				sys.stderr.write("\n")
-				self.warning(_("Warning: when help is displayed, no files are processsed"))
-			sys.exit(0)
-		#parse and validate arguments
-		for argument in argumentlist:
-			if self.extension(argument) in ('ods', 'odt', 'xlsx', 'docx',
-				'xlsm', 'docm', 'xltx', 'dotx', 'xltm', 'dotm'):
-				if not self.document_file:
-					self.document_file = argument
-				elif not self.out_file:
-					self.out_file = argument
-			elif self.extension(argument) == 'csv':
-				if not self.csv_file:
-					self.csv_file = argument
-				else:
-					self.stop(_("Error: expected one file of csv type, got more than one"), 1)
-			elif self.extension(argument) == 'xml':
-				if not self.out_file:
-					self.out_file = argument
-					self.xml = 1
-					if self.verbose: self.warning(_("Producing xml output file"))
-			elif argument == argumentlist[2] and self.document_file and self.csv_file and not self.out_file:
-				#out_file has not been identified but both other files have, just use the 3rd argument
-				self.out_file = argument
-		if not self.document_file: self.stop(_("Error: could not identify the template file in the given arguments."), 1)
+    def parse_args(self, arguments):
+        '''parse arguments'''
+        EN_DASH = '–'
+        if isinstance(arguments, str):  # if arguments is a string, split it into a list.
+            arguments = arguments.replace(EN_DASH, '--')  # openoffice may sometimes replace a double-dash with an en-dash (unicode 2013), change it to double-dash.
+            arguments = shlex.split(arguments)
+        elif sys.version_info[0] == 2 and isinstance(arguments, unicode):  # if arguments is a unicode string, split it into a list.
+            arguments = arguments.replace(EN_DASH.decode('utf-8'), '--').encode()  # openoffice may sometimes replace a double-dash with an en-dash (unicode 2013), change it to double-dash.
+            arguments = shlex.split(arguments)
+        # else: arguments is alread a list, no action required
+        try:
+            optionlist, argumentlist = getopt.gnu_getopt(arguments, "hHqvxnVzs:t:e:c:Dd:S:o:",
+                ["input=", "template=", "output=", "comment=", "div",
+                    "template-stdin-ods", "template-stdin-odt", "template-stdin-html",
+                    "template-stdin-xlsx", "template-stdin-docx"])
+        except getopt.GetoptError:
+            self.warning(_("Error processing arguments, outputting help infomation."))
+            self.help()
+            sys.exit(1)
+        for o, a in optionlist:
+            if o == "-h": self.showhelp = 1
+            elif o == "-q": self.quiet = 1
+            elif o == "-v": self.verbose = 1
+            elif o == "-x": self.xml = 1
+            elif o == "-n": self.nodata = 1
+            elif o == "-c":
+                if a == "\\t":
+                    self.delimiter = "\t"
+                else:
+                    self.delimiter = a
+            elif o == "-d": self.dateformat = a
+            elif o == "-V":
+                self.stop("version "+self.VERSION)
+            elif o == "-o":
+                self.order = list(map( self.int_minus_1, a.split(",") ))
+                for i in range(len(self.order)):
+                    if self.order[i] is None:
+                        self.colSkips += 1
+            elif o == "-D":
+                self.warning(_("outputting help for date codes."))
+                self.datehelp()
+                sys.exit(0)
+            elif o == "-H": self.header_from_csv = 1
+            elif o == "-s":
+                try:
+                    self.start = int(a)
+                except ValueError:
+                    self.stop(_("Error: ")+a+_(" does not look like a number"), 1)
+            elif o == "-S":
+                try:
+                    self.rowSkips = int(a)
+                except ValueError:
+                    self.stop(_("Error: ")+a+_(" does not look like a number"), 1)
+            elif o == "-t":
+                try:
+                    self.table = int(a)
+                except ValueError:
+                    self.table = a
+            elif o == "-e":
+                try:
+                    self.end = int(a)
+                except ValueError:
+                    self.stop(_("Error: ")+a+_(" does not look like a number"), 1)
+            elif o == "--input":
+                self.csv_file = a
+                if self.extension(a) == 'tsv':
+                    self.delimiter = "\t"
+            elif o == "--template":
+                self.document_file = a
+            elif o == "--output":
+                self.out_file = a
+            elif o == "--comment":
+                self.comment = a
+            elif o == "--div":
+                self.div = 1
+            elif o == "--template-stdin-ods":
+                self.document_file = "stdin"
+                self.doctype = "ods"
+            elif o == "--template-stdin-odt":
+                self.document_file = "stdin"
+                self.doctype = "odt"
+            elif o == "--template-stdin-html":
+                self.document_file = "stdin"
+                self.doctype = "html"
+            elif o == "--template-stdin-xlsx":
+                self.document_file = "stdin"
+                self.doctype = "xlsx"
+            elif o == "--template-stdin-docx":
+                self.document_file = "stdin"
+                self.doctype = "docx"
+            elif o == "-z":
+                self.debug = 1
+            else:
+                self.stop(_("Error: Unrecognized option "+o), 1)
+        if self.showhelp:
+            self.warning(_("Outputting help infomation."))
+            self.help()
+            if argumentlist and not self.quiet:
+                sys.stderr.write("\n")
+                self.warning(_("Warning: when help is displayed, no files are processsed"))
+            sys.exit(0)
+        #parse and validate arguments
+        for argument in argumentlist:
+            if self.extension(argument) in ('ods', 'odt', 'html', 'htm', 'xlsx', 'docx',
+                'xlsm', 'docm', 'xltx', 'dotx', 'xltm', 'dotm'):
+                if not self.document_file:
+                    self.document_file = argument  # first argument
+                elif not self.out_file:
+                    self.out_file = argument  # second argument
+            elif self.extension(argument) in ('csv', 'tsv'):
+                if not self.csv_file:
+                    self.csv_file = argument
+                    if self.extension(argument) == 'tsv':
+                        self.delimiter = "\t"
+                else:
+                    self.stop(_("Error: expected one file of csv type, got more than one"), 1)
+            elif self.extension(argument) == 'xml':
+                if not self.out_file:
+                    self.out_file = argument
+                    self.xml = 1
+                    if self.verbose: self.warning(_("Producing xml output file"))
+            elif argument == argumentlist[2] and self.document_file and self.csv_file and not self.out_file:
+                #out_file has not been identified but both other files have, just use the 3rd argument
+                self.out_file = argument
+        if not self.document_file:
+            self.stop(_("Error: could not identify the template file in the given arguments."), 1)
 
-	def test_args(self):
-		if not self.out_file:
-			self.stdout = 1
-		if not self.csv_file:
-			self.stdin = 1
-		if (not (self.extension(self.document_file) ==  self.extension(self.out_file))
-			and not (self.extension(self.document_file) ==  'xltx' and self.extension(self.out_file) == 'xlsx')
-			and not (self.extension(self.document_file) ==  'xltm' and self.extension(self.out_file) == 'xlsm')
-			and not (self.extension(self.document_file) ==  'dotx' and self.extension(self.out_file) == 'docx')
-			and not (self.extension(self.document_file) ==  'dotm' and self.extension(self.out_file) == 'docm')
-			and not self.stdout
-			and not self.quiet
-			and not self.xml):
-			self.warning(_("Warning: The template and output files should be of the same type. ") + "(" + self.extension(self.document_file) + ' vs ' + self.extension(self.out_file)+")")
-		if not os.path.exists(self.document_file): self.stop(_("Error: file was not found: ")+self.document_file, 1)
-		if (not self.stdin) and (not os.path.exists(self.csv_file)):
-			self.stop(_("Error: file was not found: ")+self.csv_file, 1)
+    def test_args(self):
+        '''Verify required arguments were provided'''
+        if not self.csv_file and not self.document_file:
+            self.stop(_("Error: neither csv file nor template file were specified"))
+        if not self.csv_file:
+            self.csv_file = "stdin"
+        if self.csv_file == "stdin" and self.document_file == "stdin":
+            self.stop(_("Error: both csv file and template file cannot come from stdin"))
+        if not self.document_file:
+            self.stop(_("Error: template file was not specified"))
+        if not self.out_file:
+            self.out_file = "stdout"
+        if (not self.quiet
+            and not (self.xml and not self.extension(self.document_file) in ['html', 'htm'])
+            and not self.out_file == "stdout"
+            and not self.document_file == "stdin"
+            and not (self.extension(self.document_file) ==  self.extension(self.out_file))
+            and not (self.extension(self.document_file) ==  'xltx' and self.extension(self.out_file) == 'xlsx') # Office template files
+            and not (self.extension(self.document_file) ==  'xltm' and self.extension(self.out_file) == 'xlsm')
+            and not (self.extension(self.document_file) ==  'dotx' and self.extension(self.out_file) == 'docx')
+            and not (self.extension(self.document_file) ==  'dotm' and self.extension(self.out_file) == 'docm')
+            and not (self.extension(self.document_file) in ['html', 'htm']
+                and self.extension(self.out_file) in ['html', 'htm']) ):
+            self.warning(_("Warning: The template and output files should be of the same type. ")
+                + "(" + self.extension(self.document_file) + ' vs ' + self.extension(self.out_file)+")")
+        if self.document_file != "stdin" and not os.path.exists(self.document_file):
+            self.stop(_("Error: file was not found: ")+self.document_file, 1)
+        if self.csv_file != "stdin" and not os.path.exists(self.csv_file):
+            self.stop(_("Error: file was not found: ")+self.csv_file, 1)
+        if (isinstance(self.table, str)
+            and not self.document_file == "stdin"
+            and not self.extension(self.document_file) in ['html', 'htm'] ):
+            self.stop(_("Error: -t option must have a number for files of type ") +
+                self.extension(self.document_file))
 
-	def __init__(self):
-		self.get_args()
+    def __init__(self):
+        self.get_args()
 
-	# end class ApplicationInitializer
+    # end class ApplicationInitializer
 
 
 class DocumentProcessor:
 
-	import xml.dom.minidom
-	import zipfile
-	import datetime
-	import re
+    import xml.dom.minidom
+    import zipfile
+    import datetime
+    import re
 
-	#properties
-	filename = ""  # string containing the source filename
-	inner_filename = "" # string containing the filename within the source file
-	content = ""  # the xml document object model
-	string_file = "" # the sharedString file in an ooxml file
-	initial_offset = 0 # used to adjust the row number
-	doctype = 'odf'
-	pattern = {
-		'ods':
-			{
-			'table': 'table:table',
-			'row': ['table:table-row', 'table:table-header-row', 'table:table-header-rows'],
-			'cellstart': 'table:table-cell'},
-		'odt':
-			{
-			'table': 'table:table',
-			'row': ['table:table-row', 'table:table-header-row', 'table:table-header-rows'],
-			'cellstart': 'table:table-cell'},
-		'xlsx':
-			{
-			'table': 'sheetData',
-			'row': ['row'],
-			'cellstart': 'c'},
-		'docx':
-			{
-			'table': 'w:tbl',
-			'row': ['w:tr'],
-			'cellstart': 'w:tc'},
-		}
-	shared_string_list = []
-	indexed_original_end = 0
-	EPOCH = 693594 # ordinal equivalent of 1/1/1970
+    #properties
+    filename = ""  # string containing the source filename
+    inner_filename = "" # string containing the filename within the source file
+    content = ""  # the xml document object model
+    string_file = "" # the sharedString file in an ooxml file
+    initial_offset = 0 # used to adjust the row number
+    doctype = 'odf'
+    pattern = {
+        'ods':
+            {
+            'table': 'table:table',
+            'row': ['table:table-row', 'table:table-header-row'],
+            'cellstart': ['table:table-cell']},
+        'odt':
+            {
+            'table': 'table:table',
+            'row': ['table:table-row', 'table:table-header-row'],
+            'cellstart': ['table:table-cell']},
+        'html-table':
+            {
+            'table': 'table',
+            'row': ['tr'],
+            'cellstart': ['th','td']},
+        'html-div':
+            {
+            'table': 'div',
+            'row': ['div'],
+            'cellstart': ['div']},
+        'xlsx':
+            {
+            'table': 'sheetData',
+            'row': ['row'],
+            'cellstart': ['c']},
+        'docx':
+            {
+            'table': 'w:tbl',
+            'row': ['w:tr'],
+            'cellstart': ['w:tc']},
+        }
+    shared_string_list = []
+    indexed_original_end = 0
+    EPOCH = 693594 # ordinal equivalent of 1/1/1970
 
-	def __init__(self, filename):
-		if not os.path.exists(filename):
-			app.stop(_("Error: file was not found: ")+filename, 1)
-		self.filename = filename
-		self.doctype = app.extension(filename)
-		if self.doctype in ("ods", "odt"):
-			self.read_odf()
-		elif self.doctype == "xlsx":
-			self.read_xlsx()
-		elif self.doctype == "docx":
-			self.read_docx()
-		elif self.doctype in ("xlsm", "xltx", "xltm"):
-			self.doctype = "xlsx" # process the same as xlsx
-			self.read_xlsx()
-		elif self.doctype in ("docm", "dotx", "dotm"):
-			self.doctype = "docx" # process the same as docx
-			self.read_docx()
-		else:
-			app.stop(_("Error: Could not identify the template file type."))
+    def __init__(self, filename):
+        self.filename = filename
+        if self.filename == "stdin":
+            self.doctype = app.doctype
+        else:
+            self.doctype = app.extension(filename)
+        if self.doctype in ("ods", "odt"):
+            self.read_odf()
+        elif self.doctype in ("html", "htm"):
+            if app.div:
+                self.doctype = "html-div"
+            else:
+                self.doctype = "html-table"
+            app.xml = 1
+            self.read_html()
+        elif self.doctype == "xlsx":
+            self.read_xlsx()
+        elif self.doctype == "docx":
+            self.read_docx()
+        elif self.doctype in ("xlsm", "xltx", "xltm"):
+            self.doctype = "xlsx" # process the same as xlsx
+            self.read_xlsx()
+        elif self.doctype in ("docm", "dotx", "dotm"):
+            self.doctype = "docx" # process the same as docx
+            self.read_docx()
+        else:
+            app.stop(_("Error: Could not identify the template file type."))
 
-	def read_odf(self):
-		'''Read an odf file (either odt or ods) and parse content'''
-		self.inner_filename = "content.xml"
-		self.content = self.read_inner_document(self.inner_filename)
-		try:
-			firstcell = self.content.getElementsByTagName(self.pattern[self.doctype]['cellstart'])[0].firstChild.firstChild
-		except Exception:
-			firstcell = self.content.createTextNode("")
-		if firstcell.data[:8].lower() == 'csv2odf:':  # The first cell contains options
-			app.parse_args(firstcell.data[8:])
-			app.get_args()  # we want command line args to override args in the template, so reload the command line args
-			parent = firstcell.parentNode
-			while parent and not parent.tagName in self.pattern[self.doctype]['row']: # ascend to parent of row
-				parent = parent.parentNode
-			if parent.tagName == 'table:table-row' or parent.tagName == 'table:table-header-row':
-				firstrow = parent
-				parent = firstrow.parentNode
-				parent.removeChild(firstrow)
-				firstrow.unlink()
-				self.initial_offset = -1
+    def read_odf(self):
+        '''Read an odf file (either odt or ods) and parse content'''
+        self.inner_filename = "content.xml"
+        self.content = self.read_inner_document(self.inner_filename)
+        table = self.element(self.pattern[self.doctype]['table'], app.table)
+        firstrow = self.element(self.pattern[self.doctype]['row'], node=table)
+        firstcell = self.element(self.pattern[self.doctype]['cellstart'],
+            node=firstrow).firstChild.firstChild
+        if firstcell and firstcell.data[:8].lower() == 'csv2odf:':  # The first cell contains options
+            app.parse_args(firstcell.data[8:])
+            app.get_args()  # we want command line args to override args in the template, so reload the command line args
+            parent = firstrow.parentNode
+            parent.removeChild(firstrow)
+            firstrow.unlink()
+            self.initial_offset = -1
 
-	def read_xlsx(self):
-		# read content
-		self.inner_filename = "xl/worksheets/sheet"+str(app.table)+".xml"
-		self.content = self.read_inner_document(self.inner_filename)
-		# read shared strings (xlsx)
-		self.string_file = self.read_inner_document("xl/sharedStrings.xml")
-		for string_item in self.string_file.getElementsByTagName('si'):
-			text_tag = string_item.getElementsByTagName('t')[0]
-			self.shared_string_list.append(text_tag.firstChild.data)
-		self.indexed_original_end = len(self.shared_string_list)
-		self.initial_offset = 0
-		# check for arguments in the template file
-		if self.shared_string_list[0].lower()[:8] == 'csv2odf:':  # The first cell contains options
-			app.parse_args(self.shared_string_list[0][8:])
-			app.get_args()  # we want command line args to override args in the template, so reload the command line args
-			parent = self.content.getElementsByTagName(self.pattern[self.doctype]['cellstart'])[0].firstChild
-			while parent and not parent.tagName in self.pattern[self.doctype]['row']: # ascend to parent of row
-				parent = parent.parentNode
-			if parent.tagName in self.pattern[self.doctype]['row']: # remove the row with arguments
-				firstrow = parent
-				parent = firstrow.parentNode
-				parent.removeChild(firstrow)
-				firstrow.unlink()
-				self.xlsx_shift_row(parent, -1)
-				self.initial_offset = -1
+    def read_html(self):
+        '''Read an html file and parse content'''
+        if self.filename == "stdin":
+            if sys.stdin.isatty():  # do not read from tty (keyboard)
+                if not app.quiet:
+                    app.stop(_("Error: there was no template file specified."))
+            else:
+                try:
+                    buffer = sys.stdin.read()
+                    self.content = self.xml.dom.minidom.parseString(buffer)
+                except IOError:
+                    app.stop(_("Error: there was an error while reading template from stdin."))
+        else:
+            file = open(self.filename, 'r')
+            self.content = self.xml.dom.minidom.parseString(file.read())
+            file.close()
+        table = self.element(self.pattern[self.doctype]['table'], app.table)
+        firstrow = self.element(self.pattern[self.doctype]['row'], app.rowSkips+1, table)
+        firstcell = self.element(self.pattern[self.doctype]['cellstart'], node=firstrow)
+        if firstcell and firstcell.firstChild.data[:8].lower() == 'csv2odf:':  # The first cell contains options
+            app.parse_args(firstcell.data[8:])
+            app.get_args()  # we want command line args to override args in the template, so reload the command line args
+            table.removeChild(firstrow)
+            firstrow.unlink()
+            self.initial_offset = -1
 
-	def read_docx(self):
-		self.inner_filename = "word/document.xml"
-		self.content = self.read_inner_document(self.inner_filename)
-		try:
-			firstcell = self.content.getElementsByTagName(self.pattern[self.doctype]['cellstart'])[0].getElementsByTagName('w:t')[0].firstChild
-		except Exception:
-			firstcell = self.content.createTextNode("")
-		if firstcell.data[:8].lower() == 'csv2odf:':  # The first cell contains options
-			app.parse_args(firstcell.data[8:])
-			app.get_args()  # we want command line args to override args in the template, so reload the command line args
-			parent = firstcell.parentNode
-			while parent and not parent.tagName in self.pattern[self.doctype]['row']: # ascend to parent of row
-				parent = parent.parentNode
-			if parent.tagName in self.pattern[self.doctype]['row']:
-				firstrow = parent
-				parent = firstrow.parentNode
-				parent.removeChild(firstrow)
-				firstrow.unlink()
-				self.initial_offset = -1
+    def read_xlsx(self):
+        '''Read an xlsx file (either odt or ods) and parse content'''
+        # read content
+        self.inner_filename = "xl/worksheets/sheet"+str(app.table)+".xml"
+        self.content = self.read_inner_document(self.inner_filename)
+        # read shared strings (xlsx)
+        self.string_file = self.read_inner_document("xl/sharedStrings.xml")
+        for string_item in self.string_file.getElementsByTagName('si'):
+            text_tag = string_item.getElementsByTagName('t')[0]
+            self.shared_string_list.append(text_tag.firstChild.data)
+        self.indexed_original_end = len(self.shared_string_list)
+        self.initial_offset = 0
+        # check for arguments in the template file
+        firstrow = self.element(self.pattern[self.doctype]['row'])
+        firstcell = self.element(self.pattern[self.doctype]['cellstart'], node=firstrow)
+        if (firstcell.hasAttribute('t') and firstcell.getAttribute('t') == 's'  # it's a cell with a string
+            and firstcell.hasAttribute('r') and firstcell.getAttribute('r') == 'A1'):
+            index = int(firstcell.firstChild.firstChild.data)
+            firstdata = self.shared_string_list[index]
+            if firstdata.lower()[:8] == 'csv2odf:':  # The first cell contains options
+                app.parse_args(firstdata[8:])
+                app.get_args()  # we want command line args to override args in the template, so reload the command line args
+                parent = firstrow.parentNode
+                parent.removeChild(firstrow)
+                firstrow.unlink()
+                self.xlsx_shift_row(parent, -1)
+                self.initial_offset = -1
 
-	def read_inner_document(self, inner_filename):
-		''' Inputs:
-				inner_filename: a filename within the document file to be read
-			Output: a dom xml object
-		'''
-		documentfile = self.zipfile.ZipFile(self.filename,'r')
-		try:
-			if sys.version_info[0] >= 3:
-				output = self.xml.dom.minidom.parseString(documentfile.read(inner_filename).decode("UTF-8"))
-			elif sys.version_info[0] == 2 and sys.version_info[1] >= 6:
-				output = self.xml.dom.minidom.parseString(documentfile.read(inner_filename))
-			else:
-				documentfile.close()
-				app.stop(_("Error: Your Python version is too old, this program requires version 2.6 or greater"), 1)
-		finally:
-			documentfile.close()
-		return output
+    def read_docx(self):
+        '''Read a docx file (either odt or ods) and parse content'''
+        self.inner_filename = "word/document.xml"
+        self.content = self.read_inner_document(self.inner_filename)
+        table = self.element(self.pattern[self.doctype]['table'], app.table)
+        firstrow = self.element(self.pattern[self.doctype]['row'], node=table)
+        firstcell = self.element(self.pattern[self.doctype]['cellstart'], node=firstrow)
+        firstcell_textnode = self.element('w:t', node=firstcell)
+        firstdata = firstcell_textnode.firstChild.data
+        if firstdata[:8].lower() == 'csv2odf:':  # The first cell contains options
+            app.parse_args(firstdata[8:])
+            app.get_args()  # we want command line args to override args in the template, so reload the command line args
+            parent = firstrow.parentNode
+            parent.removeChild(firstrow)
+            firstrow.unlink()
+            self.initial_offset = -1
 
-	def merge_document(self, data):
-		data_row_index = 0 # The data row index, also used as the amount to offset formulas in the cells.
-		sheet_row_number = 1 # The row number in the sheet
-		xlsx_trailing_offset = 1 # The number of row NOT added because they replaced header or template rows.
-		if self.doctype == 'xlsx':
-			table_number = 1 # xlsx has a seperate file for each table (tab), so it's always the first table in the file.
-		else:
-			table_number = app.table
-		table = self.element(self.pattern[self.doctype]['table'], table_number) # extract table
-		header_row = self.find_child(self.pattern[self.doctype]['row'], table) # extract header
-		if app.header_from_csv:  # put the csv header into output header
-			merged_header_row = self.merge_row(header_row, data.row(data_row_index), sheet_row_number, data_row_index + self.initial_offset)
-			table.replaceChild(merged_header_row, header_row)
-			data_row_index += 1
-			try:
-				template_row = merged_header_row.nextSibling
-			except Exception:
-				app.stop(_("Error: a sample row of data was not found in the template"))
-			sheet_row_number += 1
-			xlsx_trailing_offset += 1
-		else:
-			try:
-				template_row = header_row.nextSibling
-			except Exception:
-				app.stop(_("Error: a sample row of data was not found in the template"))
-			sheet_row_number += 1
-		if not template_row:  # the template row does not exist
-			app.stop(_("Error: A row of sample data was not provided in the template file."), 1)
-		for i in range(app.rowSkips):
-			template_row = template_row.nextSibling
-			sheet_row_number += 1
-		if app.verbose:  # display verbose report
-			i = self.filename.rfind('/') + 1
-			if i == -1: i = 0
-			app.warning(self.filename[i:] + _(" has ") + str(len(template_row.getElementsByTagName(self.pattern[self.doctype]['cellstart']))-1) + _(" columns."))
-		# insert the first row of data into the template row
-		first_data_row = self.merge_row(template_row, data.row(data_row_index), sheet_row_number, data_row_index + self.initial_offset)
-		table.replaceChild(first_data_row, template_row)
-		data_row_index += 1
-		# insert the remaining rows of data as new rows
-		insert_point = first_data_row.nextSibling
-		sheet_row_number += 1
-		for data_row_index in range(data_row_index, data.rows()):
-			data_row = data.row(data_row_index)
-			merged_row = self.merge_row(template_row, data_row, sheet_row_number, data_row_index + self.initial_offset)
-			table.insertBefore(merged_row, insert_point)
-			sheet_row_number += 1
-		if self.doctype == 'xlsx':  # change the row numbers for remaining rows in xlsx
-			increment_row = insert_point
-			while increment_row:
-				for cell in increment_row.getElementsByTagName('c'):
-					if cell.hasAttribute('r'):
-						attrib = cell.getAttribute('r')
-						col_letter = ''.join(self.re.findall('[A-Z]', attrib))
-						row_number = int(''.join(self.re.findall('[0-9]', attrib)))
-						cell.setAttribute('r', col_letter+str(row_number + data.rows() - xlsx_trailing_offset))
-				increment_row = increment_row.nextSibling
+    def read_inner_document(self, inner_filename):
+        ''' Inputs:
+                inner_filename: a filename within the document file to be read
+            Output: a dom xml object
+        '''
+        if self.filename == "stdin":
+            if sys.stdin.isatty():
+                if not app.quiet:  # do not read from tty (keyboard)
+                    app.stop(_("Error: there was no template file specified."))
+            else:
+                try:
+                    documentfile = self.zipfile.ZipFile(sys.stdin,'r')
+                except IOError:
+                    app.stop(_("Error: there was an error while reading template from stdin."))
+        else:
+            documentfile = self.zipfile.ZipFile(self.filename,'r')
+        try:
+            if sys.version_info[0] >= 3:
+                output = self.xml.dom.minidom.parseString(documentfile.read(inner_filename).decode("UTF-8"))
+            elif sys.version_info[0] == 2 and sys.version_info[1] >= 6:
+                output = self.xml.dom.minidom.parseString(documentfile.read(inner_filename))
+            else:
+                documentfile.close()
+                app.stop(_("Error: Your Python version is too old, this program requires version 2.6 or greater"), 1)
+        finally:
+            documentfile.close()
+        return output
 
-	def merge_row(self, template_row, data_row, sheet_row_number, formula_offset):
-		output_row = template_row.cloneNode(True)
-		cell = self.element(self.pattern[self.doctype]['cellstart'], 1, output_row)
-		for cell_index in range(len(data_row) + app.colSkips):
-			if type(cell) == type(None):  # an empty cell is in the template
-				app.stop(_("Error: There are too few or missing columns in the template file sample data."), 1)
-			data_column = app.order[cell_index]
-			if data_column is None:
-				data_item = ""
-			else:
-				data_item = data_row[data_column]
-			merged_cell = self.merge_cell(cell, data_item, sheet_row_number, formula_offset)
-			output_row.replaceChild(merged_cell, cell)
-			cell = merged_cell.nextSibling
-		return output_row
+    def merge_document(self, data):
+        '''Input:
+            data:    an object containing data from the csv file
+           Output:   modifies self.content '''
+        data_row_index = 0 # The data row index, also used as the amount to offset formulas in the cells.
+        sheet_row_number = app.rowSkips + 1 # The row number in the sheet
+        xlsx_trailing_offset = 1 # The number of row NOT added because they replaced header or template rows.
+        if self.doctype == 'xlsx':
+            table_number = 1 # xlsx has a seperate file for each table (tab), so it's always the first table in the file.
+        else:
+            table_number = app.table
+        table = self.element(self.pattern[self.doctype]['table'], table_number) # extract table
+        if table is None:
+            app.stop(_("Error: the table was not found"))
+        header_row = self.element(self.pattern[self.doctype]['row'], app.rowSkips + 1,
+            table, descend=(self.doctype != "html-div")) # extract header
+        if header_row is None:
+            app.stop(_("Error: the first row was not found"))
+        if app.header_from_csv:  # put the csv header into output header
+            merged_header_row = self.merge_row(header_row, data.row(data_row_index),
+                sheet_row_number, data_row_index + self.initial_offset)
+            table.replaceChild(merged_header_row, header_row)
+            data_row_index += 1
+            xlsx_trailing_offset += 1
+        try:
+            template_row = self.element(self.pattern[self.doctype]['row'], app.rowSkips + 2,
+                table, descend=(self.doctype != "html-div"))
+        except Exception:
+            app.stop(_("Error: a sample row of data was not found in the template"))
+        sheet_row_number += 1
+        if not template_row:  # the template row does not exist
+            app.stop(_("Error: A row of sample data was not provided in the template file."), 1)
+        if app.verbose:  # display verbose report
+            i = self.filename.rfind('/') + 1
+            if i == -1: i = 0
+            count_list = []
+            for pattern in self.pattern[self.doctype]['cellstart']:
+                element_list = template_row.getElementsByTagName(pattern)
+                count = 0
+                for element in element_list:
+                    if element.hasChildNodes():
+                        count += 1
+                count_list.append(count)
+            columns = max(count_list)
+            app.warning(self.filename[i:] + _(" has ") + str(columns) + _(" columns."))
+        # insert the first row of data into the template row
+        if app.nodata:
+            parent = template_row.parentNode
+            parent.removeChild(template_row)
+            template_row.unlink()
+        else:
+            first_data_row = self.merge_row(template_row, data.row(data_row_index),
+                sheet_row_number, data_row_index + self.initial_offset)
+            table.replaceChild(first_data_row, template_row)
+            data_row_index += 1
+            # insert the remaining rows of data as new rows
+            insert_point = first_data_row.nextSibling
+            sheet_row_number += 1
+        for data_row_index in range(data_row_index, data.rows()):
+            data_row = data.row(data_row_index)
+            merged_row = self.merge_row(template_row, data_row,
+                sheet_row_number, data_row_index + self.initial_offset)
+            table.insertBefore(merged_row, insert_point)
+            sheet_row_number += 1
+        if self.doctype == 'xlsx':  # change the row numbers for remaining rows in xlsx
+            increment_row = insert_point
+            while increment_row:
+                for cell in increment_row.getElementsByTagName('c'):
+                    if cell.hasAttribute('r'):
+                        attrib = cell.getAttribute('r')
+                        col_letter = ''.join(self.re.findall('[A-Z]', attrib))
+                        row_number = int(''.join(self.re.findall('[0-9]', attrib)))
+                        cell.setAttribute('r', col_letter+str(row_number + data.rows() - xlsx_trailing_offset))
+                increment_row = increment_row.nextSibling
 
-	def merge_cell(self, template_cell, data_item, sheet_row_number, formula_offset):
-		# Inputs:
-		#	template_cell		a single cell used as the template, formatting is copied
-		#	data_item			a string that will replace the text payload in the template_cell
-		#	sheet_row_number	the row number were the cell will be placed
-		#	formula_offset		an integer that is added to formula cell addresses
-		# Output:
-		#	output_cell
-		if app.debug:
-			app.warning(" in: " + template_cell.toxml())
-		output_cell = template_cell.cloneNode(True)
-		if output_cell.hasAttribute('table:formula'):
-			formula = output_cell.getAttribute('table:formula')
-			formula = self.formula_offset(formula, formula_offset)
-			output_cell.setAttribute('table:formula', formula)
-		f_list = template_cell.getElementsByTagName('f')
-		if len(f_list) > 0:   # there is an 'f' (formula) tag
-			formula = f_list[0].firstChild.data
-			data_item = self.formula_offset(formula, formula_offset)
-		if output_cell.hasAttribute('office:value'):
-			output_cell.setAttribute('office:value', data_item)
-		if output_cell.hasAttribute('r'):
-			col_letter = ''.join(self.re.findall('[A-Z]', output_cell.getAttribute('r')))
-			output_cell.setAttribute('r', col_letter+str(sheet_row_number))
-		if output_cell.hasAttribute('office:date-value'): # it's a date
-			output_cell.setAttribute('office:date-value', self.format_date(data_item))
-			output_cell.firstChild.firstChild.data = ""  # for a date, leave the cell text empty
-		elif output_cell.hasAttribute('t') and output_cell.getAttribute('t') == 's':  # it's an xlsx cell
-			index = str(len(self.shared_string_list))
-			self.shared_string_list.append(data_item)
-			output_cell.firstChild.firstChild.data = index
-		elif self.doctype in ('ods', 'xlsx'):
-			output_cell.firstChild.firstChild.data = data_item
-		elif self.doctype == 'odt':
-			text_line_list = data_item.splitlines()
-			paragraph = output_cell.firstChild
-			paragraph_template = paragraph.cloneNode(True)
-			if not text_line_list: text_line_list = [""]
-			paragraph.firstChild.data = text_line_list[0]
-			for text_line in text_line_list[1:]:
-				last_paragraph = paragraph_template.cloneNode(True)
-				last_paragraph.firstChild.data = text_line  # put the value in the cell text
-				output_cell.appendChild(last_paragraph)
-		elif self.doctype == 'docx':
-			text_line_list = data_item.splitlines()
-			paragraph = output_cell.getElementsByTagName('w:p')[0]
-			text_node = paragraph.getElementsByTagName('w:t')[0]
-			paragraph_template = paragraph.cloneNode(True)
-			if not text_line_list: text_line_list = [""]
-			text_node.firstChild.data = text_line_list[0]
-			for text_line in text_line_list[1:]:
-				last_paragraph = paragraph_template.cloneNode(True)
-				text_node = last_paragraph.getElementsByTagName('w:t')[0]
-				text_node.firstChild.data = text_line
-				output_cell.appendChild(last_paragraph)
-		else:
-			app.stop(_("Error: document type '"+self.doctype+"' is not recognized in merge_cell."), 1)
-		if app.debug:
-			app.warning("out: " + output_cell.toxml())
-		return output_cell
+    def merge_row(self, template_row, data_row, sheet_row_number, formula_offset):
+        '''Inputs:
+            template_row:    a row of xml cells
+            data_row:        a list of csv data items
+            sheet_row_number: the row number were the row will be placed
+            formula_offset:  an integer that is added to formula cell addresses
+           Output:           a row of xml cell with csv data merged into it'''
+        output_row = template_row.cloneNode(True)
+        for cell_index in range(len(data_row) + app.colSkips):
+            cell = self.element(self.pattern[self.doctype]['cellstart'], cell_index + 1, output_row)
+            if cell is None:  # an empty cell is in the template
+                app.stop(_("Error: There are too few or missing columns in the template file sample data."), 1)
+            data_column = app.order[cell_index]
+            if data_column is None:
+                data_item = ""
+            else:
+                data_item = data_row[data_column]
+            merged_cell = self.merge_cell(cell, data_item, sheet_row_number, formula_offset)
+            output_row.replaceChild(merged_cell, cell)
+        return output_row
 
-	def element(self, element_name, occurance=1, node=None):
-		'''Search nodes for an element.  Descend into child nodes.'''
-		if node is None:
-			node = self.content
-		num_found = 0
-		for child in node.childNodes:
-			if child.nodeType == self.content.ELEMENT_NODE and child.tagName == element_name:
-				num_found += 1
-				if num_found >= occurance:
-					return child
-			if child.hasChildNodes():
-				found_in_child = self.element(element_name, occurance-num_found, child)
-				if found_in_child:
-					return found_in_child
-		return None
+    def merge_cell(self, template_cell, data_item, sheet_row_number, formula_offset):
+        '''Inputs:
+            template_cell     a single cell used as the template, formatting is copied
+            data_item         a string that will replace the text payload in the template_cell
+            sheet_row_number  the row number were the cell will be placed
+            formula_offset    an integer that is added to formula cell addresses
+           Output:
+            output_cell '''
+        if app.debug:
+            app.warning(" in: " + template_cell.toxml())
+        output_cell = template_cell.cloneNode(True)
+        if self.doctype == 'ods':
+            if output_cell.hasAttribute('office:date-value'): # it's a date
+                output_cell.setAttribute('office:date-value', self.format_date(data_item))
+                output_cell.firstChild.firstChild.data = ""  # for a date, leave the cell text empty
+            if output_cell.hasAttribute('table:formula'):
+                formula = output_cell.getAttribute('table:formula')
+                formula = self.formula_offset(formula, formula_offset)
+                output_cell.setAttribute('table:formula', formula)
+            if output_cell.hasAttribute('office:value'):
+                output_cell.setAttribute('office:value', data_item)
+            output_cell.firstChild.firstChild.data = data_item
+        elif self.doctype == 'xlsx':
+            formula = self.element('f', node=output_cell)
+            if formula:
+                formula.firstChild.data = self.formula_offset(formula.firstChild.data, formula_offset)
+            if output_cell.hasAttribute('t') and output_cell.getAttribute('t') == 's':  # it's a cell with a string
+                index = str(len(self.shared_string_list))
+                self.shared_string_list.append(data_item)
+                cell_value = self.element('v', node=output_cell)
+                cell_value.firstChild.data = index
+            else:
+                cell_value = self.element('v', node=output_cell)
+                cell_value.firstChild.data = data_item
+            if output_cell.hasAttribute('r'):
+                col_letter = ''.join(self.re.findall('[A-Z]', output_cell.getAttribute('r')))
+                output_cell.setAttribute('r', col_letter+str(sheet_row_number))
+        elif self.doctype == 'odt':
+            if output_cell.hasAttribute('office:date-value'): # it's a date
+                output_cell.setAttribute('office:date-value', self.format_date(data_item))
+                output_cell.firstChild.firstChild.data = ""  # for a date, leave the cell text empty
+            if output_cell.hasAttribute('table:formula'):
+                formula = output_cell.getAttribute('table:formula')
+                formula = self.formula_offset(formula, formula_offset)
+                output_cell.setAttribute('table:formula', formula)
+            if output_cell.hasAttribute('office:value'):
+                output_cell.setAttribute('office:value', data_item)
+            text_line_list = data_item.splitlines()
+            paragraph = output_cell.firstChild
+            paragraph_template = paragraph.cloneNode(True)
+            if not text_line_list: text_line_list = [""]
+            paragraph.firstChild.data = text_line_list[0]
+            for text_line in text_line_list[1:]:
+                last_paragraph = paragraph_template.cloneNode(True)
+                last_paragraph.firstChild.data = text_line  # put the value in the cell text
+                output_cell.appendChild(last_paragraph)
+        elif self.doctype in ['html-table', 'html-div']:
+            text_line_list = data_item.splitlines()
+            if not text_line_list: text_line_list = [""]
+            output_cell.firstChild.data = text_line_list[0]
+            for text_line in text_line_list[1:]:
+                output_cell.appendChild(self.content.createElement("br"))
+                output_cell.appendChild(self.content.createTextNode(text_line))
+        elif self.doctype == 'docx':
+            text_line_list = data_item.splitlines()
+            paragraph = output_cell.getElementsByTagName('w:p')[0]
+            text_node = paragraph.getElementsByTagName('w:t')[0]
+            paragraph_template = paragraph.cloneNode(True)
+            if not text_line_list: text_line_list = [""]
+            text_node.firstChild.data = text_line_list[0]
+            for text_line in text_line_list[1:]:
+                last_paragraph = paragraph_template.cloneNode(True)
+                text_node = last_paragraph.getElementsByTagName('w:t')[0]
+                text_node.firstChild.data = text_line
+                output_cell.appendChild(last_paragraph)
+        else:
+            app.stop(_("Error: document type '"+self.doctype+"' is not recognized in merge_cell."), 1)
+        if app.debug:
+            app.warning("out: " + output_cell.toxml())
+        return output_cell
 
-	def find_child(self, element_name_list, node, occurance=1):
-		'''Search nodes for an element.'''
-		num_found = 0
-		if not type(node) == type(None):
-			for child in node.childNodes:
-				for element_name in element_name_list:
-					if child.nodeType == self.content.ELEMENT_NODE and child.tagName == element_name:
-						num_found += 1
-						if num_found >= occurance:
-							return child
-		return None
+    def element(self, element_name, occurance=1, node=None, descend=1):
+        '''Search nodes for an element.  Descend into child nodes.'''
+        if node is None:
+            node = self.content
+        num_found = 0
+        if isinstance(element_name, str):  # handle element_name as either a string or a list (make it always a list)
+            element_name = [element_name]
+        for child in node.childNodes:
+            if child.nodeType == self.content.ELEMENT_NODE and child.tagName in element_name: # does this node match element_name?
+                num_found += 1
+                if ((isinstance(occurance, int) and num_found >= occurance)
+                    or (isinstance(occurance, str) and child.hasAttributes and child.getAttribute('id') == occurance)):
+                    return child
+            if descend and child.hasChildNodes():  # If the node has children, check them recursively
+                if isinstance(occurance, int):
+                    found_in_child = self.element(element_name, occurance - num_found, child)
+                else:
+                    found_in_child = self.element(element_name, occurance, child)
+                if isinstance(found_in_child, self.xml.dom.minidom.Element):
+                    return found_in_child
+                elif isinstance(found_in_child, int):
+                    num_found += found_in_child
+        if num_found > 0:
+            return num_found
+        else:
+            return None  # there were no child nodes with the specified name (element_name)
 
-	def format_date(self, date_in):
-		'''reformat a date string to a standard format'''
-		if len(app.dateformat) > 0:
-			try:
-				date = self.datetime.datetime.strptime(date_in, app.dateformat)
-			except ValueError:
-				app.stop(_("The date format")+" ["+app.dateformat+"] "+_("could not be interpreted for data: ")+date_in, 1)
-			if self.doctype == 'xlsx':
-				return str(date.toordinal() - self.EPOCH + 1.0*date.time().hour/24 + 1.0*date.time().minute/1440)
-			else:
-				return date.strftime('%Y-%m-%dT%H:%M:%S')
-		else:  # if no format string is provided, we assusme the data is already in the correct format.
-			return date_in
+    def format_date(self, date_in):
+        '''reformat a date string to a standard format'''
+        if len(app.dateformat) > 0:
+            try:
+                date = self.datetime.datetime.strptime(date_in, app.dateformat)
+            except ValueError:
+                app.stop(_("The date format")+" ["+app.dateformat+"] "+_("could not be interpreted for data: ")+date_in, 1)
+            if self.doctype == 'xlsx':
+                return str(date.toordinal() - self.EPOCH + 1.0*date.time().hour/24 + 1.0*date.time().minute/1440)
+            else:
+                return date.strftime('%Y-%m-%dT%H:%M:%S')
+        else:  # if no format string is provided, we assusme the data is already in the correct format.
+            return date_in
 
-	def formula_offset(self, formula, location):
-		'''Alter a spreadsheet formula so that cell references are offset to the current location.
-			inputs:
-			formula 	a string containing the formula
-			location	the current data row where the first data row is 1 '''
-		output = ""
-		remainder = formula
-		previous = 0
-		for match in self.re.finditer('[a-zA-Z]([0-9]+)', formula):
-			value = int(match.group(1))
-			output += formula[previous:match.start(1)] + str(value + location)
-			remainder = formula[match.end(1):]
-			previous = match.end(1)
-		return output + remainder
+    def formula_offset(self, formula, location):
+        '''Alter a spreadsheet formula so that cell references are offset to the current location.
+            inputs:
+            formula     a string containing the formula
+            location    the current data row where the first data row is 1 '''
+        output = ""
+        remainder = formula
+        previous = 0
+        for match in self.re.finditer('[a-zA-Z]([0-9]+)', formula):
+            value = int(match.group(1))
+            output += formula[previous:match.start(1)] + str(value + location)
+            remainder = formula[match.end(1):]
+            previous = match.end(1)
+        return output + remainder
 
-	def insert_dates_or_comments(self, node=None):
-		'''Search nodes for [date] keywords in text, replace with current time.  Descend into child nodes.'''
-		if node is None: # a node was not provided, use root of document content
-			node = self.content
-		if self.doctype == 'xlsx':
-			for index, string in enumerate(self.shared_string_list):
-				string = self.insert_date_or_comment(string)
-				self.shared_string_list[index] = string
-		else:
-			for child in node.childNodes:
-				if child.nodeType == self.content.TEXT_NODE:
-					child.data = self.insert_date_or_comment(child.data)
-				if child.hasChildNodes():
-					self.insert_dates_or_comments(child)
+    def insert_dates_or_comments(self, node=None):
+        '''Search nodes for [date] keywords in text, replace with current time.  Descend into child nodes.'''
+        if node is None: # a node was not provided, use root of document content
+            node = self.content
+        if self.doctype == 'xlsx':
+            for index, string in enumerate(self.shared_string_list):
+                string = self.insert_date_or_comment(string)
+                self.shared_string_list[index] = string
+        else:
+            for child in node.childNodes:
+                if child.nodeType == self.content.TEXT_NODE:
+                    child.data = self.insert_date_or_comment(child.data)
+                if child.hasChildNodes():
+                    self.insert_dates_or_comments(child)
 
-	def insert_date_or_comment(self, string):
-		'''Searches for a date tag like [date]
-		or a date tag with a format like [date %Y-%m-%d]
-		or a date tag with an offset like [date-1] in days
-		and replaces it with the local date.
-		Also search for [csv2odf-comment] and replace with self.comment.'''
-		if string is None:
-			return None
-		pattern = self.re.compile("\[csv2odf-comment\]", self.re.IGNORECASE)
-		string = pattern.sub(app.comment, string) # replace '[csv2odf-comment]' with app.comment
-		position = 0
-		start = string.lower().find("[date", position)
-		position = start
-		while start >= 0:
-			end = string.find("]", position)
-			if end == -1:
-				position = start + 1
-				continue
-			date_spec = string[start+5:end]
-			offset = self.datetime.timedelta(0)
-			if date_spec.startswith("+") or date_spec.startswith("-"):
-				# there will be a date offset
-				end_of_offset = date_spec.find(" ", 1)
-				if end_of_offset == -1:
-					end_of_offset = end
-				try:
-					offset = self.datetime.timedelta(float(date_spec[0:end_of_offset]))
-					date_spec = date_spec[end_of_offset:]
-				except ValueError:
-					# the string cannot be interpreted, assume it should be part of the date format and not an offset
-					offset = self.datetime.timedelta(0)
-			display_date = self.datetime.datetime.today()+offset
-			date_spec = date_spec[1:]	# eliminate the space before the time format
-			if not date_spec:
-				date_spec = "%Y-%m-%d"
-			time_string = display_date.strftime(date_spec)
-			string = string[:start] + time_string + string[end+1:]
-			position = start + len(time_string)
-			start = string.lower().find("[date", position)
-		return string
+    def insert_date_or_comment(self, string):
+        '''Searches for a date tag like [date]
+        or a date tag with a format like [date %Y-%m-%d]
+        or a date tag with an offset like [date-1] in days
+        and replaces it with the local date.
+        Also search for [csv2odf-comment] and replace with self.comment.'''
+        if string is None:
+            return None
+        pattern = self.re.compile("\[csv2odf-comment\]", self.re.IGNORECASE)
+        string = pattern.sub(app.comment, string) # replace '[csv2odf-comment]' with app.comment
+        position = 0
+        start = string.lower().find("[date", position)
+        position = start
+        while start >= 0:
+            end = string.find("]", position)
+            if end == -1:
+                position = start + 1
+                continue
+            date_spec = string[start+5:end]
+            offset = self.datetime.timedelta(0)
+            if date_spec.startswith("+") or date_spec.startswith("-"):
+                # there will be a date offset
+                end_of_offset = date_spec.find(" ", 1)
+                if end_of_offset == -1:
+                    end_of_offset = end
+                try:
+                    offset = self.datetime.timedelta(float(date_spec[0:end_of_offset]))
+                    date_spec = date_spec[end_of_offset:]
+                except ValueError:
+                    # the string cannot be interpreted, assume it should be part of the date format and not an offset
+                    offset = self.datetime.timedelta(0)
+            display_date = self.datetime.datetime.today()+offset
+            date_spec = date_spec[1:]    # eliminate the space before the time format
+            if not date_spec:
+                date_spec = "%Y-%m-%d"
+            time_string = display_date.strftime(date_spec)
+            string = string[:start] + time_string + string[end+1:]
+            position = start + len(time_string)
+            start = string.lower().find("[date", position)
+        return string
 
-	def xlsx_shift_row(self, table, shift_qty, start_row=1, stop_row=999999):
-		'''Adjust the 'r' (row) attribute of row and cell tags within a range of table rows. (For xlsx)'''
-		row = table.firstChild
-		row_number = 1
-		while row and row_number <= stop_row:
-			tagged_row_number = int(row.getAttribute('r'))
-			tagged_row_number += shift_qty
-			row.setAttribute('r', str(tagged_row_number))
-			if row_number >= start_row:
-				for cell in row.getElementsByTagName('c'):
-					attrib = cell.getAttribute('r')
-					tagged_column_letter = ''.join(self.re.findall('[A-Z]', attrib))
-					tagged_row_number = int(''.join(self.re.findall('[0-9]', attrib)))
-					tagged_row_number += shift_qty
-					cell.setAttribute('r', tagged_column_letter + str(tagged_row_number))
-			row = row.nextSibling
-			row_number += 1
-		for merge_tag in self.content.getElementsByTagName('mergeCell'):
-			''' ref looks like "C4:D4", ref_tuple looks like ('C', '4', ':', 'D', '4') '''
-			ref = merge_tag.getAttribute('ref')
-			ref_tuple = self.re.findall('([A-Z]+)([0-9]+)(:)([A-Z]+)([0-9]+)', ref)[0]
-			out_list = [ref_tuple[0]]
-			out_list.append(str(int(ref_tuple[1]) + shift_qty))
-			out_list.append(':')
-			out_list.append(ref_tuple[3])
-			out_list.append(str(int(ref_tuple[4]) + shift_qty))
-			merge_tag.setAttribute('ref', ''.join(out_list))
+    def xlsx_shift_row(self, table, shift_qty, start_row=1, stop_row=999999):
+        '''Adjust the 'r' (row) attribute of row and cell tags within a range of table rows. (For xlsx)'''
+        row = table.firstChild
+        row_number = 1
+        while row and row_number <= stop_row:
+            tagged_row_number = int(row.getAttribute('r'))
+            tagged_row_number += shift_qty
+            row.setAttribute('r', str(tagged_row_number))
+            if row_number >= start_row:
+                for cell in row.getElementsByTagName('c'):
+                    attrib = cell.getAttribute('r')
+                    tagged_column_letter = ''.join(self.re.findall('[A-Z]', attrib))
+                    tagged_row_number = int(''.join(self.re.findall('[0-9]', attrib)))
+                    tagged_row_number += shift_qty
+                    cell.setAttribute('r', tagged_column_letter + str(tagged_row_number))
+            row = row.nextSibling
+            row_number += 1
+        for merge_tag in self.content.getElementsByTagName('mergeCell'):
+            ''' ref looks like "C4:D4", ref_tuple looks like ('C', '4', ':', 'D', '4') '''
+            ref = merge_tag.getAttribute('ref')
+            ref_tuple = self.re.findall('([A-Z]+)([0-9]+)(:)([A-Z]+)([0-9]+)', ref)[0]
+            out_list = [ref_tuple[0]]
+            out_list.append(str(int(ref_tuple[1]) + shift_qty))
+            out_list.append(':')
+            out_list.append(ref_tuple[3])
+            out_list.append(str(int(ref_tuple[4]) + shift_qty))
+            merge_tag.setAttribute('ref', ''.join(out_list))
 
-	def repackage(self, out_filename):
-		'''Take an odf document and pass each file contained in it to the output except replace content.xml with data.'''
-		success = 0
-		if app.xml:  # output an xml file, not an odf
-			outputfile = open(out_filename,'wb')
-			outputfile.write(self.content.toxml().encode('utf-8'))
-			outputfile.close()
-			success = 1
-		else:  # output an odf file
-			documentfile = self.zipfile.ZipFile(self.filename,'r')
-			if app.stdout:  # send the output to stdout
-				if sys.version_info[0] == 2:
-					import cStringIO
-					buffer = cStringIO.StringIO()
-				else:
-					import io
-					buffer = io.BytesIO()
-				outputfile = self.zipfile.ZipFile(buffer,'w')
-			else:  # send the to output to a file
-				try:
-					outputfile = self.zipfile.ZipFile(out_filename,'w')
-				except Exception:
-					documentfile.close()
-					app.stop(_("Error opening output: ")+out_filename, 1)
-			try:
-				for name in documentfile.namelist():
-					if name == self.inner_filename:
-						outputfile.writestr(name, self.content.toxml().encode('utf-8'))
-						success = 1
-					elif name == "xl/sharedStrings.xml":
-						sst = self.string_file.getElementsByTagName("sst")[0]  # get a sample sst
-						xmlns = sst.getAttribute('xmlns')
-						parent = sst.parentNode
-						parent.removeChild(sst)
-						sst.unlink()
-						sst = self.string_file.createElement('sst')
-						sst.setAttribute("xmlns", xmlns)
-						sst.setAttribute("count", str(len(self.shared_string_list)))
-						sst.setAttribute("uniqueCount", str(len(self.shared_string_list)))
-						parent.appendChild(sst)
-						for string in self.shared_string_list:
-							text = self.string_file.createTextNode(string)
-							t = self.string_file.createElement('t')
-							t.appendChild(text)
-							si = self.string_file.createElement('si')
-							si.appendChild(t)
-							sst.appendChild(si)
-						outputfile.writestr(name, self.string_file.toxml().encode('utf-8'))
-					else:
-						content = documentfile.read(name)
-						outputfile.writestr(name, content)
-			finally:
-				documentfile.close()
-				outputfile.close()
-			if app.stdout:
-				if sys.version_info[0] == 2:
-					sys.stdout.write(buffer.getvalue())
-				else:
-					sys.stdout.buffer.write(buffer.getvalue())
-				buffer.close()
-		return success
+    def repackage(self, out_filename):
+        '''Take an odf document and pass each file contained in it to the output except replace content.xml with data.'''
+        success = 0
+        if app.xml:  # output an xml file, not an odf (also for html)
+            if out_filename == "stdout":
+                if sys.version_info[0] >= 3:
+                    sys.stdout.write(self.content.toxml())
+                else:
+                    sys.stdout.write(self.content.toxml().encode('utf-8'))
+                success = 1
+            else:
+                outputfile = open(out_filename,'wb')
+                outputfile.write(self.content.toxml().encode('utf-8'))
+                outputfile.close()
+                success = 1
+        else:  # output an odf file
+            if self.filename == "stdin":
+                if sys.stdin.isatty():
+                    if not app.quiet:  # do not read from tty (keyboard)
+                        app.stop(_("Error: there was no template file specified."))
+                else:
+                    try:
+                        documentfile = self.zipfile.ZipFile(sys.stdin,'r')
+                    except IOError:
+                        app.stop(_("Error: there was an error while reading template from stdin."))
+            else:
+                documentfile = self.zipfile.ZipFile(self.filename,'r')
+            if out_filename == "stdout":  # send the output to stdout
+                if sys.version_info[0] == 2:
+                    import cStringIO
+                    buffer = cStringIO.StringIO()
+                else:
+                    import io
+                    buffer = io.BytesIO()
+                outputfile = self.zipfile.ZipFile(buffer,'w')
+            else:  # send the to output to a file
+                try:
+                    outputfile = self.zipfile.ZipFile(out_filename,'w')
+                except Exception:
+                    documentfile.close()
+                    outputfile.close()
+                    app.stop(_("Error opening output: ")+out_filename, 1)
+            try:
+                for name in documentfile.namelist():
+                    if name == self.inner_filename:
+                        outputfile.writestr(name, self.content.toxml().encode('utf-8'))
+                        success = 1
+                    elif name == "xl/sharedStrings.xml":
+                        sst = self.string_file.getElementsByTagName("sst")[0]  # get a sample sst
+                        xmlns = sst.getAttribute('xmlns')
+                        parent = sst.parentNode
+                        parent.removeChild(sst)
+                        sst.unlink()
+                        sst = self.string_file.createElement('sst')
+                        sst.setAttribute("xmlns", xmlns)
+                        sst.setAttribute("count", str(len(self.shared_string_list)))
+                        sst.setAttribute("uniqueCount", str(len(self.shared_string_list)))
+                        parent.appendChild(sst)
+                        for string in self.shared_string_list:
+                            text = self.string_file.createTextNode(string)
+                            t = self.string_file.createElement('t')
+                            t.appendChild(text)
+                            si = self.string_file.createElement('si')
+                            si.appendChild(t)
+                            sst.appendChild(si)
+                        outputfile.writestr(name, self.string_file.toxml().encode('utf-8'))
+                    else:
+                        content = documentfile.read(name)
+                        outputfile.writestr(name, content)
+            finally:
+                documentfile.close()
+                outputfile.close()
+            if out_filename == "stdout":
+                if sys.version_info[0] == 2:
+                    sys.stdout.write(buffer.getvalue())
+                else:
+                    sys.stdout.buffer.write(buffer.getvalue())
+                buffer.close()
+        return success
 
-	# end class DocumentProcessor
+    # end class DocumentProcessor
 
 
 class IncomingDataSource:
 
-	#properties
-	filename = ""
-	buffer = []
+    #properties
+    filename = ""
+    buffer = []
 
-	# these app variables are used:
-	#app.start
-	#app.end
-	#app.delimiter
-	#app.verbose
-	#app.stdin
-	#app.quiet
+    # these app variables are used:
+    #app.start
+    #app.end
+    #app.delimiter
+    #app.verbose
+    #app.quiet
 
-	def read_csv(self):
-		'''Read a csv file and split each line into lists of data elements.'''
-		if app.stdin:
-			if sys.stdin.isatty():
-				if not app.quiet:
-					app.warning(_("Warning: there was no csv file specified, output will have no data added."))
-					databuffer1 = ""
-			else:
-				try:
-					databuffer1 = sys.stdin.read()
-				except IOError:
-					databuffer1 = ""
-		else:
-			inputfile = open(self.filename,'r')
-			databuffer1 = inputfile.read()
-			inputfile.close()
-		#------------------
-		quote='"'
-		row = []
-		element = ""
-		within_quote = 0
-		cr = '\r'
-		end_of_line='\n'
-		rows_in = 0
-		rows_out = 0
-		for i in range(len(databuffer1)):
-			c = databuffer1[i]
-			if within_quote:
-				if c == quote and (
-					i+1 >= len(databuffer1)
-					or databuffer1[i+1] in (app.delimiter, end_of_line)
-					or (databuffer1[i+1]==cr and databuffer1[i+2]==end_of_line) ):
-					# This quote is at the end of the field, exit within_quote mode
-					within_quote = 0
-				elif c == quote and databuffer1[i+1] == quote:
-					# This is a dual double-quote, convert to a single double-quote
-					continue
-				else:
-					element += c
-			else:
-				if c == app.delimiter:
-					# end of a field
-					row.append(element)
-					element = ""
-				elif c == quote and not element:
-					within_quote = 1
-				elif c == end_of_line:
-					rows_in += 1
-					if rows_in >= app.start and (rows_in <= app.end or app.end == 0):
-						row.append(element)
-						self.buffer.append(row)
-						rows_out += 1
-					element = ""
-					row = []
-				elif c == cr and (databuffer1[i+1] == end_of_line or not element):
-					continue
-				else:
-					element += c
-		#-----------------
-		if rows_out==0 and not app.quiet:   # no correct rows were found, give a warning
-			i = self.filename.rfind('/') + 1
-			if i == -1: i = 0
-			if len(databuffer1) == 0:
-				app.warning(_("Warning: ") + self.filename[i:] + _(" is empty."))
-			else:
-				app.warning(_("Warning: ") + self.filename[i:] + _(" is malformed."))
-		if app.verbose:
-			# display verbose report
-			if app.stdin:
-				self.filename = "csv input"
-				i = 0
-			else:
-				i = self.filename.rfind('/') + 1
-				if i == -1: i = 0
-			if len(self.buffer) > 0:
-				app.warning(self.filename[i:] + _(" has ") + str(len(self.buffer[0])) + _(" columns and ") + str(rows_out) + _(" rows."))
-			else:
-				app.warning(self.filename[i:] + _(" has 0 columns and ") + str(rows_out) + _(" rows."))
+    def read_csv(self):
+        '''Read a csv file and split each line into lists of data elements.'''
+        import csv
+        self.buffer = []
+        if self.filename == "stdin":
+            if sys.stdin.isatty():
+                if not app.quiet:  # do not read from tty (keyboard), give a warning and process with no input
+                    app.warning(_("Warning: there was no csv file specified, output will have no data added."))
+            else:
+                csvReader = csv.reader(sys.stdin, delimiter=app.delimiter)
+                for row in csvReader:
+                    self.buffer.append(row)
+        else:
+            inputfile = open(self.filename,'r')
+            csvReader = csv.reader(inputfile, delimiter=app.delimiter)
+            for row in csvReader:
+                self.buffer.append(row)
+            inputfile.close()
+        self.buffer = self.buffer[app.start-1:app.end]
+        if sys.version_info[0] == 2 and len(self.buffer) > 0:  # decode utf-8 for python 2.x
+            for row in range(len(self.buffer)):
+                for column in range(len(self.buffer[0])):
+                    self.buffer[row][column] = self.buffer[row][column].decode("UTF-8")
+        if app.verbose:  # display verbose report
+            i = self.filename.rfind('/') + 1
+            if i == -1: i = 0
+            if len(self.buffer) > 0:
+                app.warning(self.filename[i:] + _(" has ") + str(len(self.buffer[0])) + _(" columns and ") + str(len(self.buffer)) + _(" rows."))
+            else:
+                app.warning(self.filename[i:] + _(" has 0 columns and ") + str(len(self.buffer)) + _(" rows."))
 
-	def item(self, row, col):
-		'''Return a data item at the specified row and column position.'''
-		if row is None or col is None:
-			return None
-		else:
-			return self.buffer[row][col]
+    def item(self, row, col):
+        '''Return a data item at the specified row and column position.'''
+        if row is None or col is None:
+            return None
+        else:
+            return self.buffer[row][col]
 
-	def row(self, row):
-		'''Return a row of data.'''
-		return self.buffer[row]
+    def row(self, row):
+        '''Return a row of data.'''
+        if 0 <= row < len(self.buffer):
+            return self.buffer[row]
+        else:
+            return None
 
-	def rows(self):
-		'''Return the number of rows.'''
-		return len(self.buffer)
+    def rows(self):
+        '''Return the number of rows.'''
+        return len(self.buffer)
 
-	def columns(self):
-		'''Return the number of columns.'''
-		return len(self.buffer[0])
+    def columns(self):
+        '''Return the number of columns.'''
+        return len(self.buffer[0])
 
-	def content(self):
-		return self.buffer
+    def content(self):
+        '''Return the internal data buffer.'''
+        return self.buffer
 
-	def __init__(self, filename):
-		self.filename = filename
-		self.read_csv()
-		if len(self.buffer) == 0 or len(self.buffer[0]) == 0:
-			app.nodata = 1
+    def __init__(self, filename):
+        self.filename = filename
+        self.read_csv()
+        if len(self.buffer) == 0 or len(self.buffer[0]) == 0:
+            app.nodata = 1
 
-	# end class IncomingDataSource
+    # end class IncomingDataSource
 
 
 if __name__ == "__main__":
-	app = ApplicationInitializer()
-	document = DocumentProcessor(app.document_file)
-	app.test_args()  # open the document before testing the args because args can be embedded in the document
-	document.insert_dates_or_comments()
-	data = IncomingDataSource(app.csv_file)
-	if not app.nodata:
-		if not app.order: # if no order was specified, setup the default
-			app.order = range(data.columns())
-		document.merge_document(data)
-	document.repackage(app.out_file)
+    app = ApplicationInitializer()
+    document = DocumentProcessor(app.document_file)
+    app.test_args()  # open the document before testing the args because args can be embedded in the document
+    document.insert_dates_or_comments()
+    data = IncomingDataSource(app.csv_file)
+    if not app.nodata:
+        if not app.order: # if no order was specified, setup the default
+            app.order = range(data.columns())
+        document.merge_document(data)
+    document.repackage(app.out_file)
 
-#kate: tab-width 4;
