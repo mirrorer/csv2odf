@@ -1,4 +1,4 @@
-.TH "csv2odf" "1" "Apr 2010" "Larry Jordan" "Text Processing"
+.TH "csv2odf" "1" "Feb 2011" "Larry Jordan" "Text Processing"
 .SH "NAME"
 .LP 
 csv2odf \- convert csv files to open document format
@@ -7,13 +7,13 @@ csv2odf \- convert csv files to open document format
 csv2odf [\fIoption\fP] <\fIcsvfile\fP> <\fItemplatefile\fP> <\fIoutputfile\fP>
 .SH "DESCRIPTION"
 .LP 
-csv2odf is a command line tool that can convert a \fIcomma seperated value\fR (csv) file to an ods or odt document.  csv2odf is useful for creating reports from databases and other data sources that produce csv files.  csv2odf can be combined with cron and shell scripts to automatically generate business reports.
+csv2odf is a command line tool that can convert a \fIcomma seperated value\fR (csv) file into an ods, odt, xlsx, or docx document.  csv2odf is useful for creating reports from databases and other data sources that produce csv files.  csv2odf can be combined with cron and shell scripts to automatically generate business reports.
 .LP 
-The csv data is merged with a \fItemplate\fR file to produce the output file.  The template is a standard open document file as produced by OpenOffice.org.  The template can be a spreadsheet file (ods) or document file (odt).
+The csv data is merged with a \fItemplate\fR file to produce the output file.  The template is a document file as produced by OpenOffice.org or Word.  The template can be a spreadsheet file (ods or xlsx) or document file (odt or docx).
 .LP 
-If the template is a \fIspreadsheet\fR, the first row will be treated as a header row.  (Override with \-H)  The second row is repeated for every row in the csv file.  The formatting in the second row cells will be applied to each data cell of the output file.  In a spreadsheet template, the second row needs to contain some data: cells that may contain letters (not just numbers) should have letters; adjacent cells should not contain repeated data or else OpenOffice may merge/compress them.
+If the template is a \fIspreadsheet\fR, the first row will be treated as a header row.  (Override with \-H)  The formatting in the second row cells will be applied to each data cell of the output file.  In a spreadsheet template, the second row needs to contain some data: cells that may contain letters (not just numbers) should have letters; adjacent cells should not contain repeated data or else OpenOffice may merge/compress them.
 .LP 
-If the template is a \fIdocument\fR, it must contain a table that the csv data will be inserted into.  The table will be processed the same as a spreadsheet.
+If the template is a \fIdocument\fR, it must contain a table that the csv data will be inserted into.  The table will be processed similar to a spreadsheet.
 .LP 
 In the header or footer of the template, you can insert a \fI[date]\fR tag (the word "date" enclosed in brackets).  The date tag will be replaced by the current date.  The date format can be changed using format codes (see below), for example [date %Y\-%m\-%d] will produce a date like 2008\-02\-04.  A date with a day offset from the current date can be created by using +n or \-n, for example [date\-1] would insert the date before today.
 .LP
@@ -44,6 +44,9 @@ end reading at the nth row of the csv file
 \fB\-S\fR <\fIn\fR>
 skip the first n rows of the template file, the header will be the next row after those skipped
 .TP 
+\fB\-t\fR <\fIn\fR>
+specify which tab or table to add data to, default first table
+.TP 
 \fB\-d\fR <\fIfmt\fR>
 date format within csv data is specified by \fIfmt\fR string, see \-D for codes
 .TP 
@@ -57,7 +60,7 @@ suppress all warning messages
 create an xml output file instead of odf
 .TP 
 \fB\-n\fR
-do not merge the data into output, use with \-x to extract test a long line template xml codes
+do not merge the data into output, use with \-x to extract template xml codes
 .TP 
 \fB\--input=\fR<\fIfile\fR>
 specify the csv data file location
@@ -67,6 +70,9 @@ specify the tempate file location
 .TP 
 \fB\--output=\fR<\fIfile\fR>
 specify the output file location
+.TP 
+\fB\-z\fR
+display debugging information
 .SH "DATE FORMAT CODES"
 .LP 
 The date format codes are the same ones used by Python's \fIstrftime\fR function.
@@ -132,7 +138,7 @@ Specify format for dates in the csv file:
 .IP 
 \fBcsv2odf \-d "%m/%d/%y %H:%M" data.csv template.ods output.ods\fR
 .LP 
-Dates in the csv file can be almost any format.  You can tell the program the format to be expected with the \-d option.  The program knows which columns are dates by looking for date formatted cells in the template.
+Dates in the csv file can be almost any format.  You can tell the program the format to be expected with the \-d option.  In ods files, the program knows which columns are dates by looking for date formatted cells in the template.  In xlsx files, format the date then mark the cell with the text "csv2odf-date" (without quotes).
 .LP 
 The csv file has a header:
 .IP 

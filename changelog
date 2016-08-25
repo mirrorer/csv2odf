@@ -1,27 +1,33 @@
-csv2odf (1.03); urgency=low
+csv2odf (1.04) unstable; urgency=low
 
-   * rewritten to use python xml.dom module, simplifying the code
-   * options can now be included in the template file
+  * added support for xlsx and docx file formats
 
-   -- Larry Jordan  <w322 at users.souceforge.net>  2010-04-12
+ -- Larry Jordan  <w322 at users.souceforge.net>  12 Feb 2011 12:00:00 +0000
 
-csv2odf (1.02); urgency=low
+csv2odf (1.03) unstable; urgency=low
 
-   * csv2odf is now compatible with Python 3, requires Python 2.6 or greater
-   * csv file is now optional when not merging data
-   * Date styles are now preserved
+  * rewritten to use python xml.dom module, simplifying the code
+  * options can now be included in the template file
 
-   -- Larry Jordan  <w322 at users.souceforge.net>  2009-12-26
+ -- Larry Jordan  <w322 at users.souceforge.net>  12 Apr 2010 12:00:00 +0000
 
-csv2odf (1.01); urgency=low
+csv2odf (1.02) unstable; urgency=low
 
-   * Minor code cleanup
+  * csv2odf is now compatible with Python 3, requires Python 2.6 or greater
+  * csv file is now optional when not merging data
+  * Date styles are now preserved
 
-   -- Larry Jordan  <w322 at users.souceforge.net>  2009-11-07
+ -- Larry Jordan  <w322 at users.souceforge.net>  26 Dec 2009 12:00:00 +0000
 
-csv2odf (1.00); urgency=low
+csv2odf (1.01) unstable; urgency=low
 
-   * First release.
+  * Minor code cleanup
 
-   -- Larry Jordan  <w322 at users.souceforge.net>  2009-10-03
+ -- Larry Jordan  <w322 at users.souceforge.net>  07 Nov 2009 12:00:00 +0000
+
+csv2odf (1.00) unstable; urgency=low
+
+  * First release.
+
+ -- Larry Jordan  <w322 at users.souceforge.net>  03 Oct 2009 12:00:00 +0000
 

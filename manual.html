@@ -18,24 +18,24 @@ csv2odf [<i>option</i>]
 <h2><a name='sect2' href='#toc2'>Description</a></h2>
 <p>
 csv2odf is a command line tool
-that can convert a <i>comma seperated value</i> (csv) file to an ods or odt document.
- csv2odf is useful for creating reports from databases and other data sources
-that produce csv files.  csv2odf can be combined with cron and shell scripts
-to automatically generate business reports. <p>
-The csv data is merged with
-a <i>template</i> file to produce the output file.  The template is a standard
-open document file as produced by OpenOffice.org.  The template can be a
-spreadsheet file (ods) or document file (odt). <p>
-If the template is a <i>spreadsheet</i>,
-the first row will be treated as a header row.  (Override with -H)  The second
-row is repeated for every row in the csv file.  The formatting in the second
-row cells will be applied to each data cell of the output file.  In a spreadsheet
+that can convert a <i>comma seperated value</i> (csv) file into an ods, odt, xlsx,
+or docx document.  csv2odf is useful for creating reports from databases
+and other data sources that produce csv files.  csv2odf can be combined
+with cron and shell scripts to automatically generate business reports.
+<p>
+The csv data is merged with a <i>template</i> file to produce the output file.
+ The template is a document file as produced by OpenOffice.org or Word. 
+The template can be a spreadsheet file (ods or xlsx) or document file (odt
+or docx). <p>
+If the template is a <i>spreadsheet</i>, the first row will be treated
+as a header row.  (Override with -H)  The formatting in the second row cells
+will be applied to each data cell of the output file.  In a spreadsheet
 template, the second row needs to contain some data: cells that may contain
 letters (not just numbers) should have letters; adjacent cells should not
 contain repeated data or else OpenOffice may merge/compress them. <p>
 If the
 template is a <i>document</i>, it must contain a table that the csv data will
-be inserted into.  The table will be processed the same as a spreadsheet.
+be inserted into.  The table will be processed similar to a spreadsheet.
 <p>
 In the header or footer of the template, you can insert a <i>[date]</i> tag (the
 word "date" enclosed in brackets).  The date tag will be replaced by the
@@ -83,9 +83,13 @@ nth row of the csv file </dd>
 <dd>skip the first n rows of the template file,
 the header will be the next row after those skipped </dd>
 
+<dt><b>-t</b> &lt;<i>n</i>&gt; </dt>
+<dd>specify which tab
+or table to add data to, default first table </dd>
+
 <dt><b>-d</b> &lt;<i>fmt</i>&gt; </dt>
-<dd>date format within
-csv data is specified by <i>fmt</i> string, see -D for codes </dd>
+<dd>date format within csv
+data is specified by <i>fmt</i> string, see -D for codes </dd>
 
 <dt><b>-D</b> </dt>
 <dd>show a list of date
@@ -100,26 +104,29 @@ instead of odf </dd>
 
 <dt><b>-n</b> </dt>
 <dd>do not merge the data into output, use with -x to extract
-test a long line template xml codes </dd>
+template xml codes </dd>
 
 <dt><b>--input=</b>&lt;<i>file</i>&gt; </dt>
-<dd>specify the csv data file
-location </dd>
+<dd>specify the csv data file location </dd>
 
-<dt><b>--template=</b>&lt;<i>file</i>&gt; </dt>
+<dt><b>--template=</b>&lt;<i>file</i>&gt;
+</dt>
 <dd>specify the tempate file location </dd>
 
 <dt><b>--output=</b>&lt;<i>file</i>&gt; </dt>
-<dd>specify
-the output file location </dd>
+<dd>specify the output file location
+</dd>
+
+<dt><b>-z</b> </dt>
+<dd>display debugging information </dd>
 </dl>
 
 <h2><a name='sect4' href='#toc4'>Date Format Codes</a></h2>
 <p>
-The date format codes are the
-same ones used by Python&rsquo;s <i>strftime</i> function. <p>
-%a   Locale&rsquo;s abbreviated weekday
-name. <br>
+The date format codes
+are the same ones used by Python&rsquo;s <i>strftime</i> function. <p>
+%a   Locale&rsquo;s abbreviated
+weekday name. <br>
 %A   Locale&rsquo;s full weekday name. <br>
 %b   Locale&rsquo;s abbreviated month name. <br>
 %B   Locale&rsquo;s full month name. <br>
@@ -175,29 +182,30 @@ Specify format for dates in the csv file:
 <p>
 Dates in the csv
 file can be almost any format.  You can tell the program the format to be
-expected with the -d option.  The program knows which columns are dates by
-looking for date formatted cells in the template. <p>
-The csv file has a header:
-
+expected with the -d option.  In ods files, the program knows which columns
+are dates by looking for date formatted cells in the template.  In xlsx
+files, format the date then mark the cell with the text "csv2odf-date" (without
+quotes). <p>
+The csv file has a header: 
 <dl>
 
-<dt><b>csv2odf -H data.csv template.ods output.ods</b> </dt>
+<dt><b>csv2odf -H data.csv template.ods output.ods</b>
+</dt>
 <dd></dd>
 </dl>
 <p>
-When the csv file has column names
-on the first row, -H will cause the column name to be put into the header
-of the output file. <p>
-The csv file has a header but we don&rsquo;t want to use it:
-
+When the csv file has column names on the first row, -H will cause the column
+name to be put into the header of the output file. <p>
+The csv file has a header
+but we don&rsquo;t want to use it: 
 <dl>
 
 <dt><b>csv2odf -s 2 data.csv template.ods output.ods</b> </dt>
 <dd></dd>
 </dl>
 <p>
-This will use data from the csv
-file beginning with the second row. <p>
+This
+will use data from the csv file beginning with the second row. <p>
 
 <hr><p>
 <a name='toc'><b>Table of Contents</b></a><p>
