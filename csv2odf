@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# csv2odf  v1.08
-# Copyright (C) 2011 Larry Jordan <w322 at users.sourceforge.net>
+# csv2odf  v1.09
+# Copyright (C) 2012 Larry Jordan <w322 at users.sourceforge.net>
 
 '''Convert a csv file to odf, ods, html, xlsx,
  or docx format.  csv2odf is a command line tool that
@@ -49,7 +49,7 @@ def _(string=""):    #support for localization, not yet implemented
 
 class ApplicationInitializer:
 
-    VERSION = "1.08"
+    VERSION = "1.09"
 
     # default properties
     quiet = 0
@@ -65,7 +65,7 @@ class ApplicationInitializer:
     colSkips = 0
     rowSkips = 0
     table = 1
-    delimiter = ','
+    delimiter = None
     dateformat = ""
     order = []
     document_file = ""
@@ -404,6 +404,8 @@ class ApplicationInitializer:
             elif argument == argumentlist[2] and self.document_file and self.csv_file and not self.out_file:
                 #out_file has not been identified but both other files have, just use the 3rd argument
                 self.out_file = argument
+        if self.delimiter is None:  # if not specified, the default delimiter is comma
+            self.delimiter = ","
         if not self.document_file:
             self.stop(_("Error: could not identify the template file in the given arguments."), 1)
         if self.document_file and self.document_file != "stdin" and not os.path.exists(self.document_file):
@@ -461,10 +463,13 @@ class DocumentProcessor:
 
     #properties
     filename = ""  # string containing the source filename
-    inner_filename = "" # string containing the filename within the source file
-    content = ""  # the xml document object model
+    inner_filename = [] # a string list containing the filename(s) to be processed in the source file
+    content = []  # the xml document object model
     string_file = "" # the sharedString file in an ooxml file
+    table_name = "" # the tab name of the table
     initial_offset = 0 # used to adjust the row number
+    last_row = 0 # the number of the last inserted data row
+    xlsx_sheet_count = 0 # the number of sheet in an xlsx doc
     doctype = 'odf'
     pattern = {
         'ods':
@@ -472,37 +477,61 @@ class DocumentProcessor:
             'table': 'table:table',
             'row': ['table:table-row', 'table:table-header-row'],
             'cellstart': ['table:table-cell'],
-            'textnode': 'text:p'},
+            'textnode': 'text:p',
+            'formula': 'table:formula',
+            'chartref': 'draw:object',
+            'chartRefNotifyRange': 'draw:notify-on-update-of-ranges',
+            'chartRefLink': 'xlink:href'},
         'odt':
             {
             'table': 'table:table',
             'row': ['table:table-row', 'table:table-header-row'],
             'cellstart': ['table:table-cell'],
-            'textnode': 'text:p'},
+            'textnode': 'text:p',
+            'formula': None,
+            'chartref': None,
+            'chartRefNotifyRange': None,
+            'chartRefLink': None},
         'html-table':
             {
             'table': 'table',
             'row': ['tr'],
             'cellstart': ['th','td'],
-            'textnode': None},
+            'textnode': None,
+            'formula': None,
+            'chartref': None,
+            'chartRefNotifyRange': None,
+            'chartRefLink': None},
         'html-div':
             {
             'table': 'div',
             'row': ['div'],
             'cellstart': ['div'],
-            'textnode': 'div'},
+            'textnode': 'div',
+            'formula': None,
+            'chartref': None,
+            'chartRefNotifyRange': None,
+            'chartRefLink': None},
         'xlsx':
             {
             'table': 'sheetData',
             'row': ['row'],
             'cellstart': ['c'],
-            'textnode': 'v'},
+            'textnode': 'v',
+            'formula': 'f',
+            'chartref': None,
+            'chartRefNotifyRange': None,
+            'chartRefLink': None},
         'docx':
             {
             'table': 'w:tbl',
             'row': ['w:tr'],
             'cellstart': ['w:tc'],
-            'textnode': 'w:t'},
+            'textnode': 'w:t',
+            'formula': None,
+            'chartref': None,
+            'chartRefNotifyRange': None,
+            'chartRefLink': None},
         }
     shared_string_list = []
     indexed_original_end = 0
@@ -538,8 +567,8 @@ class DocumentProcessor:
 
     def read_odf(self):
         '''Read an odf file (either odt or ods) and parse content'''
-        self.inner_filename = "content.xml"
-        self.content = self.read_inner_document(self.inner_filename)
+        self.inner_filename.append("content.xml")
+        self.content.append(self.read_inner_document("content.xml"))
         table = self.element(self.pattern[self.doctype]['table'], app.table)
         firstrow = self.element(self.pattern[self.doctype]['row'], node=table)
         firstcell = self.element(self.pattern[self.doctype]['cellstart'], node=firstrow)
@@ -564,12 +593,12 @@ class DocumentProcessor:
             else:
                 try:
                     buffer = sys.stdin.read()
-                    self.content = self.xml.dom.minidom.parseString(buffer)
+                    self.content.append(self.xml.dom.minidom.parseString(buffer))
                 except IOError:
                     app.stop(_("Error: there was an error while reading template from stdin."), 1)
         else:
             file = open(self.filename, 'r')
-            self.content = self.xml.dom.minidom.parseString(file.read())
+            self.content.append(self.xml.dom.minidom.parseString(file.read()))
             file.close()
         table = self.element(self.pattern[self.doctype]['table'], app.table)
         firstrow = self.element(self.pattern[self.doctype]['row'], app.rowSkips+1, table)
@@ -583,9 +612,19 @@ class DocumentProcessor:
 
     def read_xlsx(self):
         '''Read an xlsx file (either odt or ods) and parse content'''
+        # get table name
+        worksheet_index = self.read_inner_document("xl/workbook.xml")
+        sheet_index_elements = worksheet_index.getElementsByTagName("sheet")
+        self.xlsx_sheet_count = len(sheet_index_elements)
+        for sheet_index_element in sheet_index_elements:
+            if sheet_index_element.hasAttribute("sheetId"):
+                sheetId = sheet_index_element.getAttribute("sheetId")
+                if sheetId == str(app.table) and sheet_index_element.hasAttribute("name"):
+                    self.table_name = sheet_index_element.getAttribute("name")
         # read content
-        self.inner_filename = "xl/worksheets/sheet"+str(app.table)+".xml"
-        self.content = self.read_inner_document(self.inner_filename)
+        for index in range(self.xlsx_sheet_count):
+            self.inner_filename.append("xl/worksheets/sheet"+str(index+1)+".xml")
+            self.content.append(self.read_inner_document(self.inner_filename[index]))
         # read shared strings (xlsx)
         self.string_file = self.read_inner_document("xl/sharedStrings.xml")
         for string_item in self.string_file.getElementsByTagName('si'):
@@ -611,8 +650,8 @@ class DocumentProcessor:
 
     def read_docx(self):
         '''Read a docx file (either odt or ods) and parse content'''
-        self.inner_filename = "word/document.xml"
-        self.content = self.read_inner_document(self.inner_filename)
+        self.inner_filename.append("word/document.xml")
+        self.content.append(self.read_inner_document(self.inner_filename[0]))
         table = self.element(self.pattern[self.doctype]['table'], app.table)
         firstrow = self.element(self.pattern[self.doctype]['row'], node=table)
         firstcell = self.element(self.pattern[self.doctype]['cellstart'], node=firstrow)
@@ -655,18 +694,77 @@ class DocumentProcessor:
         return output
 
     def merge_document(self, data):
+        self.last_row = app.rowSkips + data.rows() + 1
+        if self.doctype == 'xlsx':
+            for sheet_index, sheet in enumerate(self.content, 1):
+                if sheet_index == app.table:
+                    table = self.element(self.pattern[self.doctype]['table']) # extract table
+                    self.merge_table(table, data)
+                formulas = sheet.getElementsByTagName(self.pattern[self.doctype]['formula'])
+                for formula in formulas:
+                    try:
+                        formula.firstChild.data = self.global_array_expand(formula.firstChild.data, self.table_name, app.rowSkips + 2, self.last_row)  # if searching within the table where data is inserted, the table name will be blank
+                        value = formula.nextSibling
+                        if value.tagName == 'v':
+                            formula.parentNode.removeChild(value)  # remove the value so it will be recalculated on next load
+                    except AttributeError:
+                        continue
+            self.read_charts()
+        else:
+            tables = self.content[0].getElementsByTagName(self.pattern[self.doctype]['table'])
+            for table_index, table in enumerate(tables, 1):  # find and process the table where data is inserted (and get the table name to use later)
+                if table.hasAttribute("id"):
+                    test_table = table.getAttribute("id")
+                else:
+                    test_table = ""
+                if table_index == app.table or test_table == app.table: 
+                    if table.hasAttribute("table:name"):
+                        self.table_name = table.getAttribute("table:name")
+                    self.merge_table(table, data)
+                    for pattern in self.pattern[self.doctype]['cellstart']:
+                        cells = table.getElementsByTagName(pattern)
+                        for cell in cells:
+                            if cell.hasAttribute(self.pattern[self.doctype]['formula']):
+                                formula = cell.getAttribute(self.pattern[self.doctype]['formula'])
+                                formula = self.global_array_expand(formula, "", app.rowSkips + 2, self.last_row)  # if searching within the table where data is inserted, the table name will be blank
+                                cell.setAttribute(self.pattern[self.doctype]['formula'], formula)
+                        chartrefs = table.getElementsByTagName(self.pattern[self.doctype]['chartref'])
+                        for chartref in chartrefs:
+                            if chartref.hasAttribute(self.pattern[self.doctype]['chartRefNotifyRange']):
+                                notifyRange = chartref.getAttribute(self.pattern[self.doctype]['chartRefNotifyRange'])
+                                notifyRange = self.global_array_expand(notifyRange, "", app.rowSkips + 2, self.last_row)
+                                chartref.setAttribute(self.pattern[self.doctype]['chartRefNotifyRange'], notifyRange)
+            for table_index, table in enumerate(tables, 1):  # scan all the other tables for arrays that point to the inserted data and adjust them to fit the data
+                if table_index != app.table:
+                    for pattern in self.pattern[self.doctype]['cellstart']:
+                        cells = table.getElementsByTagName(pattern)
+                        for cell in cells:
+                            if cell.hasAttribute(self.pattern[self.doctype]['formula']):
+                                formula = cell.getAttribute(self.pattern[self.doctype]['formula'])
+                                formula = self.global_array_expand(formula, self.table_name, app.rowSkips + 2, self.last_row)
+                                cell.setAttribute(self.pattern[self.doctype]['formula'], formula)
+                        chartrefs = table.getElementsByTagName(self.pattern[self.doctype]['chartref'])
+                        for chartref in chartrefs:
+                            if chartref.hasAttribute(self.pattern[self.doctype]['chartRefLink']):
+                                raw_filename = chartref.getAttribute(self.pattern[self.doctype]['chartRefLink'])
+                                filename = raw_filename[2:]+"/content.xml"
+                                self.inner_filename.append(filename)
+                                self.content.append(self.read_inner_document(filename))
+                                self.adjust_chart_data(len(self.content)-1, self.table_name, app.rowSkips + 2, self.last_row)
+                            if chartref.hasAttribute(self.pattern[self.doctype]['chartRefNotifyRange']):
+                                notifyRange = chartref.getAttribute(self.pattern[self.doctype]['chartRefNotifyRange'])
+                                notifyRange = self.global_array_expand(notifyRange, self.table_name, app.rowSkips + 2, self.last_row)
+                                chartref.setAttribute(self.pattern[self.doctype]['chartRefNotifyRange'], notifyRange)
+        
+    def merge_table(self, table, data):
         '''Input:
+            table:   a table dom object
             data:    an object containing data from the csv file
            Output:   modifies self.content '''
         no_template = False
         data_row_index = 0 # The data row index, also used as the amount to offset formulas in the cells.
         sheet_row_number = app.rowSkips + 1 # The row number in the sheet
-        xlsx_trailing_offset = 1 # The number of row NOT added because they replaced header or template rows.
-        if self.doctype == 'xlsx':
-            table_number = 1 # xlsx has a seperate file for each table (tab), so it's always the first table in the file.
-        else:
-            table_number = app.table
-        table = self.element(self.pattern[self.doctype]['table'], table_number) # extract table
+        xlsx_trailing_offset = 1 # The number of row NOT added because they self.contentreplaced header or template rows.
         if table is None:
             app.stop(_("Error: the table was not found"), 1)
         template_row_list = []
@@ -737,6 +835,9 @@ class DocumentProcessor:
         if self.doctype == 'xlsx':  # change the row numbers for remaining rows in xlsx
             increment_row = insert_point
             while increment_row:
+                if increment_row.hasAttribute('r'):
+                    row_number = int(increment_row.getAttribute('r'))
+                    increment_row.setAttribute('r', str(row_number + data.rows() - xlsx_trailing_offset))
                 for cell in increment_row.getElementsByTagName('c'):
                     if cell.hasAttribute('r'):
                         attrib = cell.getAttribute('r')
@@ -756,56 +857,53 @@ class DocumentProcessor:
         while output_row.childNodes.length > 0:
             output_row.removeChild(output_row.lastChild)
         i = 0
+        if self.doctype == 'xlsx' and output_row.hasAttribute('r'):
+            output_row.setAttribute('r', str(sheet_row_number))
         for node in template_row.childNodes:
             new_node = node.cloneNode(True)
             if new_node.hasChildNodes() and node.nodeName in self.pattern[self.doctype]['cellstart']:
                 if new_node.hasAttribute('table:number-columns-repeated'): # it's a compressed cell, expand it
                     number_columns_repeated = int(new_node.getAttribute('table:number-columns-repeated'))
                     new_node.removeAttribute('table:number-columns-repeated')
-                    data_column = app.order[i]
-                    if data_column is None:
-                        data_item = ""
-                    else:
-                        data_item = data_row[data_column]
+                    data_item = self.data_item_from_index(data_row, i)
                     merged_cell = self.merge_cell(new_node, data_item, sheet_row_number, formula_offset)
                     output_row.appendChild(merged_cell)
                     i += 1
                     for j in range(number_columns_repeated - 1):
                         additional_node = new_node.cloneNode(True)
-                        data_column = app.order[i]
-                        if data_column is None:
-                            data_item = ""
-                        else:
-                            data_item = data_row[data_column]
+                        data_item = self.data_item_from_index(data_row, i)
                         merged_cell = self.merge_cell(additional_node, data_item, sheet_row_number, formula_offset)
                         output_row.appendChild(merged_cell)
                         i += 1
                 else:
-                    data_column = app.order[i]
-                    if data_column is None:
-                        data_item = ""
-                    else:
-                        data_item = data_row[data_column]
+                    data_item = self.data_item_from_index(data_row, i)
                     merged_cell = self.merge_cell(new_node, data_item, sheet_row_number, formula_offset)
                     output_row.appendChild(merged_cell)
                     i += 1
             else:
                 while self.doctype == 'ods' and i < len(data_row): # there is more data than template cells, append unformatted cells
-                    data_column = app.order[i]
-                    if data_column is None:
-                        output_row.appendChild(create_cell_node("", i+1, sheet_row_number, formula_offset))
-                    else:
-                        output_row.appendChild(create_cell_node(data_row[data_column], i+1, sheet_row_number, formula_offset))
+                    data_item = self.data_item_from_index(data_row, i)
+                    output_row.appendChild(self.create_cell_node(data_item, i+1, sheet_row_number, formula_offset))
                     i += 1
                 output_row.appendChild(new_node) # this is where we reinsert the empty placeholder node
         while i < len(data_row): # there is more data than template cells, append unformatted cells
-            data_column = app.order[i]
-            if data_column is None:
-                output_row.appendChild(self.create_cell_node("", i+1, sheet_row_number, formula_offset))
-            else:
-                output_row.appendChild(self.create_cell_node(data_row[data_column], i+1, sheet_row_number, formula_offset))
+            data_item = self.data_item_from_index(data_row, i)
+            output_row.appendChild(self.create_cell_node(data_item, i+1, sheet_row_number, formula_offset))
             i += 1
         return output_row
+
+    def data_item_from_index(self, data_row, i, default=""):
+        '''Given an index number (i), select a data item from a data row.
+           But the one selected may be based on a sequence provided by the user (app.order).'''
+        if i < len(app.order):
+            data_column_index = app.order[i]
+        else:  # i is beyond the length of app.order
+            data_column_index = None
+        if data_column_index is not None and data_column_index < len(data_row):
+            data_item = data_row[data_column_index]
+        else: # data_column_index is not within the length of data_row
+            data_item = default
+        return data_item
 
     def merge_cell(self, template_cell, data_item, sheet_row_number, formula_offset):
         '''Inputs:
@@ -826,7 +924,7 @@ class DocumentProcessor:
                 output_cell.firstChild.firstChild.data = ""  # for a date, leave the cell text empty
             if output_cell.hasAttribute('table:formula'):
                 formula = output_cell.getAttribute('table:formula')
-                formula = self.formula_offset(formula, formula_offset)
+                formula = self.running_formula_offset(formula, formula_offset)
                 output_cell.setAttribute('table:formula', formula)
             if output_cell.hasAttribute('office:value'):
                 output_cell.setAttribute('office:value', data_item)
@@ -834,7 +932,7 @@ class DocumentProcessor:
         elif self.doctype == 'xlsx':
             formula = self.element('f', node=output_cell)
             if formula:
-                formula.firstChild.data = self.formula_offset(formula.firstChild.data, formula_offset)
+                formula.firstChild.data = self.running_formula_offset(formula.firstChild.data, formula_offset)
             if output_cell.hasAttribute('t') and output_cell.getAttribute('t') == 's':  # it's a cell with a string
                 index = str(len(self.shared_string_list))
                 self.shared_string_list.append(data_item)
@@ -852,7 +950,7 @@ class DocumentProcessor:
                 output_cell.firstChild.firstChild.data = ""  # for a date, leave the cell text empty
             if output_cell.hasAttribute('table:formula'):
                 formula = output_cell.getAttribute('table:formula')
-                formula = self.formula_offset(formula, formula_offset)
+                formula = self.running_formula_offset(formula, formula_offset)
                 output_cell.setAttribute('table:formula', formula)
             if output_cell.hasAttribute('office:value'):
                 output_cell.setAttribute('office:value', data_item)
@@ -870,8 +968,8 @@ class DocumentProcessor:
             if not text_line_list: text_line_list = [""]
             output_cell.firstChild.data = text_line_list[0]
             for text_line in text_line_list[1:]:
-                output_cell.appendChild(self.content.createElement("br"))
-                output_cell.appendChild(self.content.createTextNode(text_line))
+                output_cell.appendChild(self.content[0].createElement("br"))
+                output_cell.appendChild(self.content[0].createTextNode(text_line))
         elif self.doctype == 'docx':
             text_line_list = data_item.splitlines()
             if not text_line_list: text_line_list = [""]
@@ -893,12 +991,15 @@ class DocumentProcessor:
     def element(self, element_name, occurance=1, node=None, descend=1):
         '''Search nodes for an element.  Descend into child nodes.'''
         if node is None:
-            node = self.content
+            if self.doctype == 'xlsx':
+                node = self.content[app.table - 1]
+            else:
+                node = self.content[0]
         num_found = 0
         if isinstance(element_name, str):  # handle element_name as either a string or a list (make it always a list)
             element_name = [element_name]
         for child in node.childNodes:
-            if child.nodeType == self.content.ELEMENT_NODE and child.tagName in element_name: # does this node match element_name?
+            if child.nodeType == self.content[0].ELEMENT_NODE and child.tagName in element_name: # does this node match element_name?
                 num_found += 1
                 if ((isinstance(occurance, int) and num_found >= occurance)
                     or (isinstance(occurance, str) and child.hasAttributes and child.getAttribute('id') == occurance)):
@@ -931,33 +1032,126 @@ class DocumentProcessor:
         else:  # if no format string is provided, we assusme the data is already in the correct format.
             return date_in
 
-    def formula_offset(self, formula, location):
-        '''Alter a spreadsheet formula so that cell references are offset to the current location.
+    def running_formula_offset(self, formula, location):
+        '''Alter a spreadsheet formula as we insert rows so that cell references are offset to the current location.
             inputs:
             formula     a string containing the formula
             location    the current data row where the first data row is 1 '''
         output = ""
         remainder = formula
         previous = 0
-        for match in self.re.finditer('[a-zA-Z]([0-9]+)', formula):
+        for match in self.re.finditer('[a-zA-Z]{1,3}([0-9]+)', formula):
             value = int(match.group(1))
             output += formula[previous:match.start(1)] + str(value + location)
             remainder = formula[match.end(1):]
             previous = match.end(1)
         return output + remainder
 
+    def global_array_expand(self, formula, target_table, first_row, last_row, expand_single_reference=False):
+        '''Alter a spreadsheet formula so that cell references to the inserted data are correct.
+            inputs:
+            formula      a string containing the formula, like "of:=SUM([Data.B2:Data.B2])".
+                         a valid array to the target points to any column(s) and first row in the inserted data.
+            target_table the table name of the data insert location, null when we are scanning the same table as data insert location
+            first_row    number representing the first row of the data insert location
+            last_row     number representing the last row of the data insert location
+            output:      a modified formula '''
+        if target_table:
+            if self.doctype == 'ods':
+                target_table1 = "".join([target_table, '\.'])
+                target_table2 = target_table1
+            elif self.doctype == 'xlsx':
+                target_table1 = "".join([target_table, '\!'])
+                target_table2 = ""
+        else:
+            target_table1 = ""
+            target_table2 = ""
+        output = self.re.sub('(^|[^:A-Za-z0-9])(\${0,1}'+target_table1+'\${0,1}[A-Za-z]{1,3}\${0,1}[0-9]+:'
+            +target_table2+'\${0,1}[A-Za-z]{1,3}\${0,1})('+str(first_row)+')(|[^:A-Za-z0-9])',   
+            r'\1\g<2>'+str(last_row)+r'\4', formula)  # Data.A1:Data.A2 -> Data.A1:Data.A99
+        if expand_single_reference:
+            output = self.re.sub('(^|[^:A-Za-z0-9])(\${0,1}'+target_table1+')(\${0,1}[A-Za-z]{1,3}\${0,1})('+str(first_row)+')(|[^:A-Za-z0-9])',   
+                r'\1\2\3\4:\g<3>'+str(last_row)+r'\5', output)  # Data.A2 -> Data.A2:Data.A99
+        return output
+
+    def adjust_chart_data(self, chartIndex, target_table, first_row, last_row):
+        '''Alter a chart so that cell references to the inserted data are correct.
+            inputs:
+            chartIndex   the index in the inner_filename list of the name of the chart file in the document archive
+            target_table the table name of the data insert location, null when we are scanning the same table as data insert location
+            first_row    number representing the first row of the data insert location
+            last_row     number representing the last row of the data insert location '''
+        chart = self.content[chartIndex]
+        chart_elements = chart.getElementsByTagName('chart:plot-area')
+        chart_elements += chart.getElementsByTagName('chart:categories')
+        chart_elements += chart.getElementsByTagName('chart:series')
+        for chart_element in chart_elements:
+            if chart_element.hasAttribute('table:cell-range-address'):
+                cell_address = chart_element.getAttribute('table:cell-range-address')
+                cell_address = self.global_array_expand(cell_address, target_table, first_row, last_row)
+                chart_element.setAttribute('table:cell-range-address', cell_address)
+            if chart_element.hasAttribute('chart:values-cell-range-address'):
+                cell_address = chart_element.getAttribute('chart:values-cell-range-address')
+                cell_address = self.global_array_expand(cell_address, target_table, first_row, last_row)
+                chart_element.setAttribute('chart:values-cell-range-address', cell_address)
+            if chart_element.hasAttribute('chart:label-cell-address'):
+                cell_address = chart_element.getAttribute('chart:label-cell-address')
+                cell_address = self.global_array_expand(cell_address, target_table, first_row, last_row)
+                chart_element.setAttribute('chart:label-cell-address', cell_address)
+        chart_elements = chart.getElementsByTagName('svg:desc')
+        for chart_element in chart_elements:
+            cell_address = chart_element.firstChild.data
+            cell_address = self.global_array_expand(cell_address, target_table, first_row, last_row)
+            chart_element.firstChild.data = cell_address
+        chart_elements = chart.getElementsByTagName('c:f')
+        for chart_element in chart_elements:
+            cell_address = chart_element.firstChild.data
+            cell_address = self.global_array_expand(cell_address, target_table, first_row, last_row, expand_single_reference=True)
+            chart_element.firstChild.data = cell_address
+        
+    def read_charts(self):
+        ''' Read charts in xlsx documents '''
+        if self.filename == "stdin":
+            if sys.stdin.isatty():
+                if not app.quiet:  # do not read from tty (keyboard)
+                    app.stop(_("Error: there was no template file specified."), 1)
+            else:
+                try:
+                    documentfile = self.zipfile.ZipFile(sys.stdin,'r')
+                except IOError:
+                    app.stop(_("Error: there was an error while reading template from stdin."), 1)
+        else:
+            documentfile = self.zipfile.ZipFile(self.filename,'r')
+        try:
+            objects = documentfile.namelist()
+            regex = self.re.compile('xl/charts/chart[0-9]*.xml')
+            charts = [i for i in objects if regex.search(i)]
+            for chart in charts:
+                self.inner_filename.append(chart)
+                if sys.version_info[0] >= 3:
+                    self.content.append(self.xml.dom.minidom.parseString(documentfile.read(chart).decode("UTF-8")))
+                elif sys.version_info[0] == 2 and sys.version_info[1] >= 6:
+                    self.content.append(self.xml.dom.minidom.parseString(documentfile.read(chart)))
+                else:
+                    documentfile.close()
+                    app.stop(_("Error: Your Python version is too old, this program requires version 2.6 or greater"), 1)
+                chartIndex = len(self.inner_filename) - 1
+                self.adjust_chart_data(chartIndex, self.table_name, app.rowSkips + 2, self.last_row)
+        finally:
+            documentfile.close()
+
     def create_row(self, column_number=1, row_number=1, formula_offset=0):
-        new_row = self.content.createElement(self.pattern[self.doctype]['row'][0])
+        new_row = self.content[0].createElement(self.pattern[self.doctype]['row'][0])
         new_row.appendChild(self.create_cell_node("", column_number, row_number, formula_offset))
         return new_row
 
     def create_cell_node(self, data_item, column_number, row_number, formula_offset):
-        new_cell_node = self.content.createElement(self.pattern[self.doctype]['cellstart'][0])
+        new_cell_node = self.content[0].createElement(self.pattern[self.doctype]['cellstart'][0])
         if self.pattern[self.doctype]['textnode'] is None:
-            new_cell_node.appendChild(self.content.createTextNode(data_item))
+            new_cell_node.appendChild(self.content[0].createTextNode(data_item))
         else:
-            new_text_node = self.content.createElement(self.pattern[self.doctype]['textnode'])
-            new_text_node.appendChild(self.content.createTextNode(data_item))
+            new_text_node = self.content[0].createElement(self.pattern[self.doctype]['textnode'])
+            new_text_node.appendChild(self.content[0].createTextNode(data_item))
             new_cell_node.appendChild(new_text_node)
         if self.doctype == 'xlsx':
             new_cell_node.setAttribute('t', 's')
@@ -990,14 +1184,14 @@ class DocumentProcessor:
     def insert_dates_or_comments(self, node=None):
         '''Search nodes for [date] keywords in text, replace with current time.  Descend into child nodes.'''
         if node is None: # a node was not provided, use root of document content
-            node = self.content
+            node = self.content[0]
         if self.doctype == 'xlsx':
             for index, string in enumerate(self.shared_string_list):
                 string = self.insert_date_or_comment(string)
                 self.shared_string_list[index] = string
         else:
             for child in node.childNodes:
-                if child.nodeType == self.content.TEXT_NODE:
+                if child.nodeType == self.content[0].TEXT_NODE:
                     child.data = self.insert_date_or_comment(child.data)
                 if child.hasChildNodes():
                     self.insert_dates_or_comments(child)
@@ -1060,7 +1254,7 @@ class DocumentProcessor:
                     cell.setAttribute('r', tagged_column_letter + str(tagged_row_number))
             row = row.nextSibling
             row_number += 1
-        for merge_tag in self.content.getElementsByTagName('mergeCell'):
+        for merge_tag in self.content[0].getElementsByTagName('mergeCell'):
             ''' ref looks like "C4:D4", ref_tuple looks like ('C', '4', ':', 'D', '4') '''
             ref = merge_tag.getAttribute('ref')
             ref_tuple = self.re.findall('([A-Z]+)([0-9]+)(:)([A-Z]+)([0-9]+)', ref)[0]
@@ -1077,13 +1271,13 @@ class DocumentProcessor:
         if app.xml:  # output an xml file, not an odf (also for html)
             if out_filename == "stdout":
                 if sys.version_info[0] >= 3:
-                    sys.stdout.write(self.content.toxml())
+                    sys.stdout.write(self.content[0].toxml())
                 else:
-                    sys.stdout.write(self.content.toxml().encode('utf-8'))
+                    sys.stdout.write(self.content[0].toxml().encode('utf-8'))
                 success = 1
             else:
                 outputfile = open(out_filename,'wb')
-                outputfile.write(self.content.toxml().encode('utf-8'))
+                outputfile.write(self.content[0].toxml().encode('utf-8'))
                 outputfile.close()
                 success = 1
         else:  # output an odf file
@@ -1106,17 +1300,16 @@ class DocumentProcessor:
                     import io
                     buffer = io.BytesIO()
                 outputfile = self.zipfile.ZipFile(buffer,'w')
-            else:  # send the to output to a file
+            else:  # send the output to a file
                 try:
                     outputfile = self.zipfile.ZipFile(out_filename,'w')
                 except Exception:
                     documentfile.close()
-                    outputfile.close()
                     app.stop(_("Error opening output: ")+out_filename, 1)
             try:
                 for name in documentfile.namelist():
-                    if name == self.inner_filename:
-                        outputfile.writestr(name, self.content.toxml().encode('utf-8'))
+                    if name in self.inner_filename:
+                        outputfile.writestr(name, self.content[self.inner_filename.index(name)].toxml('UTF-8'))
                         success = 1
                     elif name == "xl/sharedStrings.xml":
                         sst = self.string_file.getElementsByTagName("sst")[0]  # get a sample sst
@@ -1188,7 +1381,7 @@ class IncomingDataSource:
         self.buffer = self.buffer[app.start-1:app.end]
         if sys.version_info[0] == 2 and len(self.buffer) > 0:  # decode utf-8 for python 2.x
             for row in range(len(self.buffer)):
-                for column in range(len(self.buffer[0])):
+                for column in range(len(self.buffer[row])):
                     self.buffer[row][column] = self.buffer[row][column].decode("UTF-8")
         if app.verbose:  # display verbose report
             i = self.filename.rfind('/') + 1

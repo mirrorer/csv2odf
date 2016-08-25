@@ -1,3 +1,10 @@
+csv2odf (1.09) unstable; urgency=low
+
+  * Fixed bug causing unreadable output in xlsx format.
+  * Graphs pointing to data are adjusted to point to inserted data.
+
+ -- Larry Jordan <w322@users.sourceforge.net>  30 Nov 2012 12:00:00 +0000
+
 csv2odf (1.08) unstable; urgency=low
 
   * Handle compressed template cells by expanding instead of generating an error.

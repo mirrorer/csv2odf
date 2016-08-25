@@ -1,5 +1,5 @@
 Package: csv2odf
-Version: 1.07
+Version: 1.09
 Architecture: all
 Maintainer: Larry Jordan <w322@users.sourceforge.net>
 Depends: python (>= 2.6)
