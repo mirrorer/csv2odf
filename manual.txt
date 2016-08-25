@@ -6,7 +6,7 @@ NAME
        csv2odf - convert csv files to open document format
 
 SYNTAX
-       csv2odf [option] <csvfile> <templatefile> <outputfile>
+       csv2odf [option] [<csvfile>] <templatefile> [<outputfile>]
 
 DESCRIPTION
        csv2odf is a command line tool that can convert a comma seperated value
@@ -20,29 +20,34 @@ DESCRIPTION
        The  template  can be a spreadsheet file (ods or xlsx) or document file
        (odt or docx).
 
-       If the template is a spreadsheet, the first row will be  treated  as  a
+       If a csv input file is not specified, input will be taken from standard
+       input  (stdin).   If  an  output  file is not specified, output will be
+       directed to standard output (stdout).  This allow the use of  the  com-
+       mand in pipes.
+
+       If  the  template  is a spreadsheet, the first row will be treated as a
        header row.  (Override with -H)  The formatting in the second row cells
        will be applied to each data cell of the output file.  In a spreadsheet
-       template,  the  second  row  needs to contain some data: cells that may
-       contain letters (not just numbers) should have letters; adjacent  cells
-       should  not contain repeated data or else OpenOffice may merge/compress
+       template, the second row needs to contain some  data:  cells  that  may
+       contain  letters (not just numbers) should have letters; adjacent cells
+       should not contain repeated data or else OpenOffice may  merge/compress
        them.
 
-       If the template is a document, it must contain a  table  that  the  csv
-       data  will  be inserted into.  The table will be processed similar to a
+       If  the  template  is  a document, it must contain a table that the csv
+       data will be inserted into.  The table will be processed similar  to  a
        spreadsheet.
 
-       In the header or footer of the template, you can insert  a  [date]  tag
-       (the  word "date" enclosed in brackets).  The date tag will be replaced
+       In  the  header  or footer of the template, you can insert a [date] tag
+       (the word "date" enclosed in brackets).  The date tag will be  replaced
        by the current date.  The date format can be changed using format codes
-       (see  below),  for  example  [date  %Y-%m-%d]  will produce a date like
+       (see below), for example [date  %Y-%m-%d]  will  produce  a  date  like
        2008-02-04.  A date with a day offset from the current date can be cre-
-       ated  by  using  +n  or  -n, for example [date-1] would insert the date
+       ated by using +n or -n, for example  [date-1]  would  insert  the  date
        before today.
 
-       The options may be placed in  the  template  file.   To  do  this,  put
-       "csv2odf:"  (without  qoutes) followed by the options in the first cell
-       (cell A1).  Note the  first  row  will  be  deleted  when  it  contains
+       The  options  may  be  placed  in  the  template file.  To do this, put
+       "csv2odf:" (without quotes) followed by the options in the  first  cell
+       (cell  A1).   Note  the  first  row  will  be  deleted when it contains
        options.
 
 OPTIONS
@@ -56,23 +61,23 @@ OPTIONS
               use char as delimiter instead of comma
 
        -o <spec>
-              specify  column order: 2,1,3 = second csv column is first.  Also
-              use to leave the contents of a template column: 1,2,,3,4  =  the
+              specify column order: 2,1,3 = second csv column is first.   Also
+              use  to  leave the contents of a template column: 1,2,,3,4 = the
               3rd template column is not overwritten.  Useful if a column con-
-              tains a formula.  The formula cell references will be offset  to
+              tains  a formula.  The formula cell references will be offset to
               the correct row.
 
        -s <n> start reading at the nth row of the csv file
 
        -e <n> end reading at the nth row of the csv file
 
-       -S <n> skip  the  first n rows of the template file, the header will be
+       -S <n> skip the first n rows of the template file, the header  will  be
               the next row after those skipped
 
        -t <n> specify which tab or table to add data to, default first table
 
        -d <fmt>
-              date format within csv data is specified by fmt string,  see  -D
+              date  format  within csv data is specified by fmt string, see -D
               for codes
 
        -D     show a list of date format codes
@@ -81,7 +86,7 @@ OPTIONS
 
        -x     create an xml output file instead of odf
 
-       -n     do  not  merge the data into output, use with -x to extract tem-
+       -n     do not merge the data into output, use with -x to  extract  tem-
               plate xml codes
 
        --input=<file>
@@ -92,6 +97,8 @@ OPTIONS
 
        --output=<file>
               specify the output file location
+
+       -V     display version number
 
        -z     display debugging information
 
@@ -139,17 +146,17 @@ EXAMPLES
 
               csv2odf -d "%m/%d/%y %H:%M" data.csv template.ods output.ods
 
-       Dates  in the csv file can be almost any format.  You can tell the pro-
-       gram the format to be expected with the -d option.  In ods  files,  the
-       program  knows  which  columns  are dates by looking for date formatted
-       cells in the template.  In xlsx files, format the date  then  mark  the
+       Dates in the csv file can be almost any format.  You can tell the  pro-
+       gram  the  format to be expected with the -d option.  In ods files, the
+       program knows which columns are dates by  looking  for  date  formatted
+       cells  in  the  template.  In xlsx files, format the date then mark the
        cell with the text "csv2odf-date" (without quotes).
 
        The csv file has a header:
 
               csv2odf -H data.csv template.ods output.ods
 
-       When  the csv file has column names on the first row, -H will cause the
+       When the csv file has column names on the first row, -H will cause  the
        column name to be put into the header of the output file.
 
        The csv file has a header but we don't want to use it:
@@ -160,4 +167,4 @@ EXAMPLES
 
 
 
-Larry Jordan                       Feb 2011                         csv2odf(1)
+Larry Jordan                       Mar 2011                         csv2odf(1)

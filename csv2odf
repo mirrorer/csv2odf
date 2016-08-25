@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# csv2odf  v1.04
+# csv2odf  v1.05
 # Copyright (C) 2011 Larry Jordan <w322 at users.sourceforge.net>
 #
 # csv2odf is free software: you can redistribute it and/or modify
@@ -25,8 +25,6 @@
 # document		DocumentProcessor
 # data			IncomingDataSource
 
-from __future__ import print_function  # For python 2.6 print function compatibility
-
 import getopt
 import shlex
 import sys
@@ -37,12 +35,16 @@ def _(string=""):	#support for localization, not yet implemented
 
 class ApplicationInitializer:
 
+	VERSION = "1.05"
+
 	# properties
 	quiet = 0
 	verbose = 0
 	showhelp = 0
 	xml = 0
 	nodata = 0
+	stdin = 0
+	stdout = 0
 	start = 0
 	end = 0
 	header_from_csv = 0
@@ -58,19 +60,24 @@ class ApplicationInitializer:
 	debug = 0
 
 	def help(self):
-		print(_("USAGE: csv2odf [OPTION] CSV TEMPLATE OUTPUT"))
-		print()
+		print(_("USAGE: csv2odf [OPTION] [CSV] TEMPLATE [OUTPUT]"))
+		print("")
 		print(_("csv2odf is a command line tool that can convert a comma seperated value"))
 		print(_("(csv) file into an ods, odt, xlsx, or docx document.  csv2odf is useful"))
 		print(_("for creating reports from databases and other data sources that produce"))
 		print(_("csv files.  csv2odf can be combined with  cron  and  shell  scripts  to"))
 		print(_("automatically generate business reports."))
-		print()
+		print("")
 		print(_("The csv data is merged with a template file to produce the output file."))
 		print(_("The template is a document file as produced by OpenOffice.org or  Word."))
 		print(_("The  template  can be a spreadsheet file (ods or xlsx) or document file"))
 		print(_("(odt or docx)."))
-		print()
+		print("")
+		print(_("If a csv input file is not specified, input will be taken from standard"))
+		print(_("input  (stdin).   If  an  output  file is not specified, output will be"))
+		print(_("directed to standard output (stdout).  This allow the use of  the  com-"))
+		print(_("mand in pipes."))
+		print("")
 		print(_("If the template is a spreadsheet, the first row will be  treated  as  a"))
 		print(_("header row.  (Override with -H)  The formatting in the second row cells"))
 		print(_("will be applied to each data cell of the output file.  In a spreadsheet"))
@@ -78,11 +85,11 @@ class ApplicationInitializer:
 		print(_("contain letters (not just numbers) should have letters; adjacent  cells"))
 		print(_("should  not contain repeated data or else OpenOffice may merge/compress"))
 		print(_("them."))
-		print()
+		print("")
 		print(_("If  the  template  is  a document, it must contain a table that the csv"))
 		print(_("data will be inserted into.  The table will be processed the same as  a"))
 		print(_("spreadsheet."))
-		print()
+		print("")
 		print(_("In  the  header  or footer of the template, you can insert a [date] tag"))
 		print(_('(the word "date" enclosed in brackets).  The date tag will be  replaced'))
 		print(_("by the current date.  The date format can be changed using format codes"))
@@ -90,12 +97,12 @@ class ApplicationInitializer:
 		print(_("2008-02-04.  A date with a day offset from the current date can be cre-"))
 		print(_("ated by using +n or -n, for example  [date-1]  would  insert  the  date"))
 		print(_("before today."))
-		print()
+		print("")
 		print(_("The  options  may  be  placed  in  the  template file.  To do this, put"))
 		print(_('"csv2odf:" (without qoutes) followed by the options in the  first  cell'))
 		print(_("(cell  A1).   Note  the  first  row  will  be  deleted when it contains"))
 		print(_("options."))
-		print()
+		print("")
 		print(_("OPTIONS"))
 		print(_("-h     displays help information"))
 		print(_("-v     verbose mode"))
@@ -127,6 +134,7 @@ class ApplicationInitializer:
 		print(_("       specify the tempate file location"))
 		print(_("--output=<file>"))
 		print(_("       specify the output file location"))
+		print(_("-V     display version number"))
 		print(_("-z     display debugging information"))
 
 	def datehelp(self):
@@ -160,8 +168,13 @@ class ApplicationInitializer:
 
 	def stop(self, message="", errnum=0):
 		'''Terminate the program with a message.'''
-		print(message)
+		if message:
+			sys.stderr.write("csv2odf: " + message + "\n")
 		sys.exit(errnum)
+
+	def warning(self, message=""):
+		'''Dislay a message and continue.'''
+		sys.stderr.write("csv2odf: " + message + "\n")
 
 	def extension(self, string):
 		'''Return the file type part of the file name.'''
@@ -177,10 +190,10 @@ class ApplicationInitializer:
 			try:
 				n = int(string)
 			except ValueError:
-				print(_("Error:"), string, _("does not look like a number"))
+				self.warning(_("Error: ") + string + _(" does not look like a number "))
 				sys.exit(1)
 			if n < 1:
-				print(_("Error:"), string, _("cannot be less than 1"))
+				self.warning(_("Error: ") + string + _(" cannot be less than 1 "))
 				sys.exit(1)
 			return n - 1
 		else:
@@ -191,7 +204,8 @@ class ApplicationInitializer:
 		arguments = sys.argv[1:]
 		if arguments:
 			self.parse_args(arguments)
-		else:  # no arguments were provided, show help
+		else:
+			self.warning(_("No arguments provided, outputting help infomation."))
 			self.help()
 			sys.exit(0)
 
@@ -206,8 +220,9 @@ class ApplicationInitializer:
 			arguments = shlex.split(arguments)
 		# else: arguments is alread a list, no action required
 		try:
-			optionlist, argumentlist = getopt.gnu_getopt(arguments, "hHqvxnzs:t:e:c:Dd:S:o:", ["input=", "template=", "output="])
+			optionlist, argumentlist = getopt.gnu_getopt(arguments, "hHqvxnVzs:t:e:c:Dd:S:o:", ["input=", "template=", "output="])
 		except getopt.GetoptError:
+			self.warning(_("Error processing arguments, outputting help infomation."))
 			self.help()
 			sys.exit(1)
 		for o, a in optionlist:
@@ -218,12 +233,15 @@ class ApplicationInitializer:
 			elif o == "-n": self.nodata = 1
 			elif o == "-c": self.delimiter = a
 			elif o == "-d": self.dateformat = a
+			elif o == "-V":
+				self.stop("version "+self.VERSION)
 			elif o == "-o":
 				self.order = list(map( self.int_minus_1, a.split(",") ))
 				for i in range(len(self.order)):
 					if self.order[i] is None:
 						self.colSkips += 1
 			elif o == "-D":
+				self.warning(_("outputting help for date codes."))
 				self.datehelp()
 				sys.exit(0)
 			elif o == "-H": self.header_from_csv = 1
@@ -258,10 +276,11 @@ class ApplicationInitializer:
 			else:
 				self.stop(_("Error: Unrecognized option "+o), 1)
 		if self.showhelp:
+			self.warning(_("Outputting help infomation."))
 			self.help()
 			if argumentlist and not self.quiet:
-				print()
-				print(_("Warning: when help is displayed, no files are processsed"))
+				sys.stderr.write("\n")
+				self.warning(_("Warning: when help is displayed, no files are processsed"))
 			sys.exit(0)
 		#parse and validate arguments
 		for argument in argumentlist:
@@ -270,8 +289,6 @@ class ApplicationInitializer:
 					self.document_file = argument
 				elif not self.out_file:
 					self.out_file = argument
-				#else:
-				#	self.stop(_("Error: expected two files of ods/odt type, got more than two"), 1)
 			elif self.extension(argument) == 'csv':
 				if not self.csv_file:
 					self.csv_file = argument
@@ -281,21 +298,22 @@ class ApplicationInitializer:
 				if not self.out_file:
 					self.out_file = argument
 					self.xml = 1
-					if self.verbose: print(_("Producing xml output file"))
+					if self.verbose: self.warning(_("Producing xml output file"))
 			elif argument == argumentlist[2] and self.document_file and self.csv_file and not self.out_file:
 				#out_file has not been identified but both other files have, just use the 3rd argument
 				self.out_file = argument
 		if not self.document_file: self.stop(_("Error: could not identify the template file in the given arguments."), 1)
 
 	def test_args(self):
-		if not self.out_file: self.stop(_("Error: could not identify the output file in the given arguments."), 1)
+		if not self.out_file:
+			self.stdout = 1
 		if not self.csv_file:
-			self.nodata = 1
-			if not self.quiet: print(_("Warning: there was no csv file specified, output will have no data added."))
-		if not self.extension(self.document_file) == self.extension(self.out_file) and not (self.quiet or self.xml):
-			print(_("Warning: The template and output files should be of the same type."), "("+self.extension(self.document_file), 'vs', self.extension(self.out_file)+")")
+			self.stdin = 1
+		if not self.stdout and not self.extension(self.document_file) == self.extension(self.out_file) and not self.quiet and not self.xml:
+			self.warning(_("Warning: The template and output files should be of the same type. ") + "(" + self.extension(self.document_file) + ' vs ' + self.extension(self.out_file)+")")
 		if not os.path.exists(self.document_file): self.stop(_("Error: file was not found: ")+self.document_file, 1)
-		if (not self.nodata) and (not os.path.exists(self.csv_file)): self.stop(_("Error: file was not found: ")+self.csv_file, 1)
+		if (not self.stdin) and (not os.path.exists(self.csv_file)):
+			self.stop(_("Error: file was not found: ")+self.csv_file, 1)
 
 	def __init__(self):
 		self.get_args()
@@ -476,7 +494,7 @@ class DocumentProcessor:
 		if app.verbose:  # display verbose report
 			i = self.filename.rfind('/') + 1
 			if i == -1: i = 0
-			print(self.filename[i:], _("has"), len(template_row.getElementsByTagName(self.pattern[self.doctype]['cellstart'])), _("columns."))
+			app.warning(self.filename[i:] + _(" has ") + str(len(template_row.getElementsByTagName(self.pattern[self.doctype]['cellstart']))-1) + _(" columns."))
 		# insert the first row of data into the template row
 		first_data_row = self.merge_row(template_row.cloneNode(True), data.row(data_row_index), sheet_row_number, data_row_index + self.initial_offset)
 		table.replaceChild(first_data_row, template_row)
@@ -524,7 +542,7 @@ class DocumentProcessor:
 		# Output:
 		#	output_cell
 		if app.debug:
-			print(" in:",template_cell.toxml())
+			app.warning(" in: " + template_cell.toxml())
 		output_cell = template_cell.cloneNode(True)
 		if output_cell.hasAttribute('table:formula'):
 			formula = output_cell.getAttribute('table:formula')
@@ -556,7 +574,7 @@ class DocumentProcessor:
 		else:
 			output_cell.firstChild.firstChild.data = data_item  # if it's not a date, put the value in the cell text
 		if app.debug:
-			print("out:", output_cell.toxml())
+			app.warning("out: " + output_cell.toxml())
 		return output_cell
 
 	def element(self, element_name, occurance=1, node=None):
@@ -701,20 +719,26 @@ class DocumentProcessor:
 		'''Take an odf document and pass each file contained in it to the output except replace content.xml with data.'''
 		success = 0
 		if app.xml:  # output an xml file, not an odf
-			outputfile = open(out_filename,'w')
-			if sys.version_info[0] >= 3:
-				outputfile.write(self.content.toxml())
-			else:
-				outputfile.write(self.content.toxml().encode('utf-8'))
+			outputfile = open(out_filename,'wb')
+			outputfile.write(self.content.toxml().encode('utf-8'))
 			outputfile.close()
 			success = 1
 		else:  # output an odf file
 			documentfile = self.zipfile.ZipFile(self.filename,'r')
-			try:
-				outputfile = self.zipfile.ZipFile(out_filename,'w')
-			except Exception:
-				documentfile.close()
-				app.stop(_("Error opening output: ")+out_filename, 1)
+			if app.stdout:  # send the output to stdout
+				if sys.version_info[0] == 2:
+					import cStringIO
+					buffer = cStringIO.StringIO()
+				else:
+					import io
+					buffer = io.BytesIO()
+				outputfile = self.zipfile.ZipFile(buffer,'w')
+			else:  # send the to output to a file
+				try:
+					outputfile = self.zipfile.ZipFile(out_filename,'w')
+				except Exception:
+					documentfile.close()
+					app.stop(_("Error opening output: ")+out_filename, 1)
 			try:
 				for name in documentfile.namelist():
 					if name == self.inner_filename:
@@ -745,6 +769,12 @@ class DocumentProcessor:
 			finally:
 				documentfile.close()
 				outputfile.close()
+			if app.stdout:
+				if sys.version_info[0] == 2:
+					sys.stdout.write(buffer.getvalue())
+				else:
+					sys.stdout.buffer.write(buffer.getvalue())
+				buffer.close()
 		return success
 
 	# end class DocumentProcessor
@@ -761,12 +791,24 @@ class IncomingDataSource:
 	#app.end
 	#app.delimiter
 	#app.verbose
+	#app.stdin
+	#app.quiet
 
 	def read_csv(self):
 		'''Read a csv file and split each line into lists of data elements.'''
-		inputfile = open(self.filename,'r')
-		databuffer1 = inputfile.read()
-		inputfile.close()
+		if app.stdin:
+			if sys.stdin.isatty():
+				if not app.quiet:
+					app.warning(_("Warning: there was no csv file specified, output will have no data added."))
+			else:
+				try:
+					databuffer1 = sys.stdin.read()
+				except IOError:
+					databuffer1 = ""
+		else:
+			inputfile = open(self.filename,'r')
+			databuffer1 = inputfile.read()
+			inputfile.close()
 		#------------------
 		quote='"'
 		row = []
@@ -809,9 +851,16 @@ class IncomingDataSource:
 		#-----------------
 		if app.verbose:
 			# display verbose report
-			i = self.filename.rfind('/') + 1
-			if i == -1: i = 0
-			print(self.filename[i:], _("has"), rows_out, _("rows and"), len(self.buffer[0]), _("columns."))
+			if app.stdin:
+				self.filename = "csv input"
+				i = 0
+			else:
+				i = self.filename.rfind('/') + 1
+				if i == -1: i = 0
+			if len(self.buffer) > 0:
+				app.warning(self.filename[i:] + _(" has ") + str(len(self.buffer[0])) + _(" columns and ") + str(rows_out) + _(" rows."))
+			else:
+				app.warning(self.filename[i:] + _(" has 0 columns and ") + str(rows_out) + _(" rows."))
 
 	def item(self, row, col):
 		'''Return a data item at the specified row and column position.'''
@@ -838,6 +887,8 @@ class IncomingDataSource:
 	def __init__(self, filename):
 		self.filename = filename
 		self.read_csv()
+		if len(self.buffer) == 0 or len(self.buffer[0]) == 0:
+			app.nodata = 1
 
 	# end class IncomingDataSource
 
@@ -847,8 +898,8 @@ if __name__ == "__main__":
 	document = DocumentProcessor(app.document_file)
 	app.test_args()  # open the document before testing the args because args can be embedded in the document
 	document.insert_dates()
+	data = IncomingDataSource(app.csv_file)
 	if not app.nodata:
-		data = IncomingDataSource(app.csv_file)
 		if not app.order: # if no order was specified, setup the default
 			app.order = range(data.columns())
 		document.merge_document(data)

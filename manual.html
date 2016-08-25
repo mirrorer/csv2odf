@@ -14,12 +14,12 @@ csv2odf - convert csv files to open document format
 <h2><a name='sect1' href='#toc1'>Syntax</a></h2>
 <p>
 csv2odf [<i>option</i>]
-&lt;<i>csvfile</i>&gt; &lt;<i>templatefile</i>&gt; &lt;<i>outputfile</i>&gt; 
+[&lt;<i>csvfile</i>&gt;] &lt;<i>templatefile</i>&gt; [&lt;<i>outputfile</i>&gt;] 
 <h2><a name='sect2' href='#toc2'>Description</a></h2>
 <p>
-csv2odf is a command line tool
-that can convert a <i>comma seperated value</i> (csv) file into an ods, odt, xlsx,
-or docx document.  csv2odf is useful for creating reports from databases
+csv2odf is a command line
+tool that can convert a <i>comma seperated value</i> (csv) file into an ods, odt,
+xlsx, or docx document.  csv2odf is useful for creating reports from databases
 and other data sources that produce csv files.  csv2odf can be combined
 with cron and shell scripts to automatically generate business reports.
 <p>
@@ -27,6 +27,10 @@ The csv data is merged with a <i>template</i> file to produce the output file.
  The template is a document file as produced by OpenOffice.org or Word. 
 The template can be a spreadsheet file (ods or xlsx) or document file (odt
 or docx). <p>
+If a csv input file is not specified, input will be taken from
+standard input (stdin).  If an output file is not specified, output will
+be directed to standard output (stdout).  This allow the use of the command
+in pipes. <p>
 If the template is a <i>spreadsheet</i>, the first row will be treated
 as a header row.  (Override with -H)  The formatting in the second row cells
 will be applied to each data cell of the output file.  In a spreadsheet
@@ -44,7 +48,7 @@ for example [date %Y-%m-%d] will produce a date like 2008-02-04.  A date with
 a day offset from the current date can be created by using +n or -n, for
 example [date-1] would insert the date before today. <p>
 The options may be placed
-in the template file.  To do this, put "csv2odf:" (without qoutes) followed
+in the template file.  To do this, put "csv2odf:" (without quotes) followed
 by the options in the first cell (cell A1).  Note the first row will be
 deleted when it contains options. 
 <h2><a name='sect3' href='#toc3'>Options</a></h2>
@@ -117,16 +121,19 @@ template xml codes </dd>
 <dd>specify the output file location
 </dd>
 
+<dt><b>-V</b> </dt>
+<dd>display version number </dd>
+
 <dt><b>-z</b> </dt>
 <dd>display debugging information </dd>
 </dl>
 
 <h2><a name='sect4' href='#toc4'>Date Format Codes</a></h2>
 <p>
-The date format codes
-are the same ones used by Python&rsquo;s <i>strftime</i> function. <p>
-%a   Locale&rsquo;s abbreviated
-weekday name. <br>
+The
+date format codes are the same ones used by Python&rsquo;s <i>strftime</i> function. <p>
+%a
+  Locale&rsquo;s abbreviated weekday name. <br>
 %A   Locale&rsquo;s full weekday name. <br>
 %b   Locale&rsquo;s abbreviated month name. <br>
 %B   Locale&rsquo;s full month name. <br>
