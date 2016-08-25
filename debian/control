@@ -1,5 +1,6 @@
 Package: csv2odf
 Version: 2.00
+Homepage: http://csv2odf.sourceforge.net/
 Architecture: all
 Installed-Size: 156
 Maintainer: Larry Jordan <w322@users.sourceforge.net>

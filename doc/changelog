@@ -1,3 +1,10 @@
+csv2odf (2.01) unstable; urgency=low
+
+  * Changed temporary file to decrease memory use during final save.
+  * Fixed xml output crash in windows.
+
+ -- Larry Jordan <w322@users.sourceforge.net>  Tue, 09 Sep 2014 21:54:06 -0400
+
 csv2odf (2.00) unstable; urgency=low
 
   * Ability to handle large data files using less memory.

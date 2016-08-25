@@ -1,7 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# csv2odf  v2.00
+# csv2odf  v2.01
 # Copyright (C) 2014 Larry Jordan <w322 at users.sourceforge.net>
 
 '''Convert a csv file to odf, ods, html, xlsx,
@@ -60,7 +60,7 @@ import cgi
 
 class ApplicationController:
 
-    VERSION = "2.00"
+    VERSION = "2.01"
 
     # default properties
     quiet = 0             # show no output
@@ -1327,7 +1327,7 @@ class DocumentProcessor:
         else:
             regex_string = self.model.tag_regex()
         self.tag_regex = re.compile(regex_string)  # target pattern needs to be a regex-OR pattern that will match either start or end tags
-        self.out_file = tempfile.SpooledTemporaryFile(max_size=self.max_buffer)
+        self.out_file = TemporaryFile(max_size=self.max_buffer)
         self.file_chunk_feeder.feed(in_file, self.chunk_process)
         self.out_file.seek(0)
         return self.out_file
@@ -1607,8 +1607,8 @@ class SharedStringFile:
     def __init__(self, in_file, special_string_replacement_object, debug):
         self.in_file = in_file
         self.special_strings = special_string_replacement_object
-        self.intermediate_file = tempfile.SpooledTemporaryFile(max_size=self.max_buffer)
-        self.out_file = tempfile.SpooledTemporaryFile(max_size=self.max_buffer)
+        self.intermediate_file = TemporaryFile(max_size=self.max_buffer)
+        self.out_file = TemporaryFile(max_size=self.max_buffer)
         self.cell_regex = re.compile("(<si><t>)([^<>]*)(</t></si>)|(</sst>)")
         #                             1 start 2 string 3 end str   4 end of list
         self.date_regex = re.compile(r"\[csv2odf-date[^\]]*\]", re.IGNORECASE)
@@ -1755,6 +1755,109 @@ class SpecialStringSubstitutionProcessor:
     # end class SpecialStringSubstitutionProcessor
 
 
+class TemporaryFile:
+    '''Like SpooledTemporaryFile, this will reside in memory until it reaches
+       a size limit or until a rollover command is received.
+       Unlike SpooledTemporaryFile, it will have a filename when it becomes a disk file.'''
+
+    name = None
+    ram_file = None
+    disk_file = None
+    is_open = False
+    mode = 'w+b'
+    is_in_ram = True
+    size_limit = 20E6
+    chunk_size = 0x10000
+    
+    def __init__(self, max_size=None, mode='w+b'):
+        self.mode = mode
+        if max_size:
+            self.size_limit = max_size
+        if mode == 'w':
+            self.ram_file = io.StringIO()
+        else:
+            self.ram_file = io.BytesIO()
+        
+    def read(self, number_of_bytes=None):
+        if self.is_in_ram:
+            return self.ram_file.read(number_of_bytes)
+        else:
+            if number_of_bytes:
+                return self.disk_file.read(number_of_bytes)
+            else:
+                return self.disk_file.read()
+    
+    def __iter__(self):
+        return self
+
+    def next(self):  # used by python 2.x
+        return self.__next__()
+          
+    def __next__(self):
+        if self.is_in_ram:
+            if self.mode == 'w':
+                line = self.ram_file.readline()
+                if line:
+                    return line
+                else:
+                    raise StopIteration
+            else:
+                return self.ram_file.__next__()
+        else:
+            return self.disk_file.__next__()
+          
+    def write(self, data):
+        if self.is_in_ram:
+            self.ram_file.write(data)
+            if self.ram_file.tell() > self.size_limit:
+                self.rollover()
+        else:
+            self.disk_file.write(data)
+    
+    def seek(self, position, start_point=0):
+        if self.is_in_ram:
+            return self.ram_file.seek(position, start_point)
+        else:
+            return self.disk_file.seek(position, start_point)
+    
+    def is_in_ram(self):
+        return self.is_in_ram
+    
+    def tell(self):
+        if self.is_in_ram:
+            return self.ram_file.tell()
+        else:
+            return self.disk_file.tell()
+          
+    def flush(self):
+        if self.is_in_ram:
+            return self.ram_file.flush()
+        else:
+            return self.disk_file.flush()
+          
+    def rollover(self):
+        self.disk_file = tempfile.NamedTemporaryFile()
+        self.name = self.disk_file.name
+        self.ram_file.seek(0)
+        self.disk_file.write(self.ram_file.read())
+        self.is_in_ram = False
+        self.ram_file.close()
+    
+    def write_to_zipfile(self, inner_filename, zipfile):
+        if self.is_in_ram:
+            zipfile.writestr(inner_filename, self.ram_file.read())
+        else:
+            zipfile.write(self.name, inner_filename)
+    
+    def close(self):
+        if self.is_in_ram:
+            self.ram_file.close()
+        else:
+            self.disk_file.close()
+
+    # end class TemporaryFile
+
+
 class DocumentArchive:
     '''Allows opening a zip archive, filenames matching a regex pattern are loaded from the archive into temporary files, new temporary files with altered content can replace old ones when the archive is rewritten to a new filename.'''
     
@@ -1784,7 +1887,7 @@ class DocumentArchive:
             if sys.stdin.isatty():
                 self.app.stop("Error: there was no template file specified.")
             else:
-                t = tempfile.SpooledTemporaryFile(max_size=self.max_buffer)
+                t = TemporaryFile(max_size=self.max_buffer)
                 if sys.version_info[0] == 2:
                     t.write(bytes(sys.stdin.read()))
                 else:
@@ -1816,7 +1919,7 @@ class DocumentArchive:
                 match = re.match(filename_regex, inner_filename)
                 if match:
                     if inner_filename not in self.fileobject_list:  # this is a new request, else ignore
-                        self.fileobject_list[inner_filename] = tempfile.SpooledTemporaryFile(max_size=self.max_buffer)         
+                        self.fileobject_list[inner_filename] = TemporaryFile(max_size=self.max_buffer)         
                         self.fileobject_list[inner_filename].write(self.in_package_file.read(inner_filename))
                         self.fileobject_list[inner_filename].seek(0)
                         if re.match(self.target_filename_pattern, inner_filename):
@@ -1826,7 +1929,7 @@ class DocumentArchive:
             if not filename_regex:
                 filename_regex = self.in_package_name
             if filename_regex not in self.fileobject_list:  # if it's already in the list, don't reopen
-                self.fileobject_list[filename_regex] = tempfile.SpooledTemporaryFile(max_size=self.max_buffer)  
+                self.fileobject_list[filename_regex] = TemporaryFile(max_size=self.max_buffer)  
                 self.fileobject_list[filename_regex].seek(0)
                 if sys.version_info[0] == 2:
                     self.fileobject_list[filename_regex].write(bytes(self.in_package_file.read()))
@@ -1881,7 +1984,7 @@ class DocumentArchive:
         '''save the fileobject_list or original files into a new zip file.'''
         error_message = "No files inserted."
         if out_file_name == "stdout":  # send the output to stdout
-            buffer = tempfile.SpooledTemporaryFile(max_size=self.max_buffer)
+            buffer = TemporaryFile(max_size=self.max_buffer)
             if self.type == 'zip':
                 outputfile = zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED)
             else:
@@ -1899,7 +2002,11 @@ class DocumentArchive:
                 for name in self.in_package_file.namelist():
                     if name in self.fileobject_list:  #write the modified file to output
                         self.fileobject_list[name].seek(0)
-                        outputfile.writestr(name, self.fileobject_list[name].read())
+                        if self.fileobject_list[name].is_in_ram:
+                            outputfile.writestr(name, self.fileobject_list[name].read())
+                        else:
+                            outputfile.write(self.fileobject_list[name].name, name)
+                        self.fileobject_list[name].close()
                         error_message = None
                     elif name == "mimetype":  # write the mimetype file to output, it is the 1st file and uncompressed
                         mimetype_info = self.in_package_file.getinfo("mimetype")  # this saves the compression type of mimetype (stored) so that it will be saved the same type of compression
@@ -1941,14 +2048,14 @@ class DocumentArchive:
                     sys.stdout.write(file.read())
         else:  # send the output to a file
             try:
-                outputfile = open(self.app.out_filename,'w')
+                outputfile = open(self.app.out_filename,'wb')
             except Exception:
                 self.app.stop("Error opening output: " + self.app.out_filename)
             self.write_output(file, outputfile)
 
     def write_output(self, in_file, out_file):
         if sys.version_info[0] == 2:
-            if in_file.__class__.__name__ == 'SpooledTemporaryFile':
+            if in_file.__class__.__name__ == 'TemporaryFile':
                 out_file.write(in_file.read())
             else:
                 out_file.write(in_file.read().decode('UTF-8'))
@@ -1984,9 +2091,9 @@ class IncomingDataSource:
             if sys.stdin.isatty():
                 self.app.stop("Error: there was no template file specified.")
             else:
-                self.inputfile = tempfile.SpooledTemporaryFile(self.max_buffer, 'w')  # inputfile needs to be seekable, so load stdin to a tempfile
+                self.inputfile = TemporaryFile(self.max_buffer, 'w')  # inputfile needs to be seekable, so load stdin to a tempfile
                 if sys.version_info[0] == 2:
-                    self.inputfile.write(bytes(sys.stdin.read()))
+                    self.inputfile.write(sys.stdin.read().decode('UTF-8'))
                 else:
                     self.inputfile.write(sys.stdin.buffer.read().decode('UTF-8'))
                 self.inputfile.seek(0)
