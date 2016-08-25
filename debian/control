@@ -1,8 +1,8 @@
 Package: csv2odf
-Version: 2.02
+Version: 2.03
 Homepage: http://csv2odf.sourceforge.net/
 Architecture: all
-Installed-Size: 160
+Installed-Size: 176
 Maintainer: Larry Jordan <w322@users.sourceforge.net>
 Depends: python (>= 2.6)
 Suggests: libreoffice

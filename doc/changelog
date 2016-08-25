@@ -1,3 +1,10 @@
+csv2odf (2.03) unstable; urgency=low
+
+  * Added -a option to append to existing data.
+  * Fixed problem with large files on Windows.
+
+ -- Larry Jordan <w322@users.sourceforge.net>  Mon, 20 Apr 2015 09:33:40 -0400
+
 csv2odf (2.02) unstable; urgency=low
 
   * Fixed pipes in Windows when using python 2.7.

@@ -16,33 +16,35 @@ DESCRIPTION
        to automatically generate business reports.
 
        The csv data is merged with a template file to produce the output file.
-       The template is a document file as produced by LibreOffice or Word,  or
-       an  html file.  The template can be a spreadsheet file (ods or xlsx), a
-       document file (odt or docx), or an html file.
+       The template can be a spreadsheet file (ods or xlsx) or a document file
+       (odt or docx), as produced by OpenOffice.org, LibreOffice, or Word. The
+       template can also be an html file.
 
-       If a csv input file is not specified, input will be taken from standard
-       input  (stdin).   If  an  output  file is not specified, output will be
-       directed to standard output (stdout).  This allows the use of the  com-
-       mand in pipes.
+       The first row of the table will be treated as a header row.   (Override
+       with  -H)  The formatting in the second row of cells will be applied to
+       each data cell of the output file.  If the -a option is used, data will
+       be  appended  below the last existing row, formatting from the last row
+       will be applied to cells in each new row.
 
-       The  first row of the table will be treated as a header row.  (Override
-       with -H)  The formatting in the second row of cells will be applied  to
-       each data cell of the output file.
-
-       If  the  template  is a spreadsheet, the second row should contain some
-       data of similar type to the incoming data  so  that  numbers/text/dates
+       If the template is a spreadsheet, the second row  should  contain  some
+       data  of  similar  type to the incoming data so that numbers/text/dates
        can be correctly identified.
 
-       If  the  template  is  a document, it must contain a table that the csv
-       data will be inserted into.  If the first table in the file is not  the
+       If the template is a document, it must contain a  table  that  the  csv
+       data  will be inserted into.  If the first table in the file is not the
        target, use the -t options to identify the table number.
 
-       If  the  template is an html file, it must contain a table that the csv
-       data will be inserted into.  If the first table in the file is not  the
-       target,  use  the  -t  options to identify the table number or table id
-       property.  The table may be made using div tags if the --div options is
-       used, in which case a div tag must enclose each cell, each row, and the
-       entire table.
+       If the template is an html file, it must contain a table  or  div  tags
+       that  the  csv  data  will be inserted into.  If the first table in the
+       file is not the target, use the -t options to identify the table number
+       or  table  id  property.   The  table may be made using div tags if the
+       --div options is used, in which case a div tag must enclose each  cell,
+       each row, and the entire table.
+
+       If a csv input file is not specified, input will be taken from standard
+       input (stdin).  If an output file is  not  specified,  output  will  be
+       directed  to standard output (stdout).  This allows the use of the com-
+       mand in pipes.
 
        In the header or footer of the template, you  can  insert  a  [csv2odf-
        date]  tag  ("csv2odf-date" enclosed in square brackets).  The date tag
@@ -87,15 +89,17 @@ OPTIONS FOR PROCESSING CSV DATA FILE
 OPTIONS FOR PROCESSING TEMPLATE FILE
        -H     insert the first csv row into the header
 
-       --comment=<text>
-              replace [csv2odf-comment] within the document with <text>
-
        -S <n> skip the first n rows of the template file, the header  will  be
               the next row after those skipped
 
        -t <n> specify  which tab or table to add data to, default first table.
               For html files, -t may be followed by a name to match  to  table
               id property.
+
+       -a     append csv data to the end of existing data
+
+       --comment=<text>
+              replace [csv2odf-comment] within the document with <text>
 
        --div  search  for  <div>  tags  instead  of <table> (html files only).
               <div> tags must be nested with levels for table, row, and cell.

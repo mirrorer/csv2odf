@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 #
-# csv2odf 2.02
-# Copyright (C) 2014 Larry Jordan
+# csv2odf 2.03
+# Copyright (C) 2015 Larry Jordan
 # <http://csv2odf.sourceforge.net>
 #
 # This program is free software; you can redistribute it and/or modify
@@ -24,12 +24,12 @@
 import distutils.core
 
 distutils.core.setup(name='csv2odf',
-      version='2.02',
+      version='2.03',
       description='Convert csv files to open document format',
       url = 'http://csv2odf.sourceforge.net',
       license='GNU GPL-3',
       author='Larry Jordan',
-      author_email='w322 at users.sourceforge.net',
+      author_email='w322@users.sourceforge.net',
       scripts=['csv2odf'],
       data_files=[ ('share/man/man1', ['doc/csv2odf.1']),
              ('share/doc', ['doc/copyright']),

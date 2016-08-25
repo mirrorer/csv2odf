@@ -1,8 +1,8 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# csv2odf  v2.02
-# Copyright (C) 2014 Larry Jordan <w322 at users.sourceforge.net>
+# csv2odf  v2.03
+# Copyright (C) 2015 Larry Jordan <w322 at users.sourceforge.net>
 
 '''Convert a csv file to odf, ods, html, xlsx,
  or docx format.  csv2odf is a command line tool that
@@ -39,9 +39,12 @@
 # model               DocumentModel
 # csv_merge_processor CSVMergeProcessor
 # formula_adjuster    FormulaAdjustmentProcessor
+# position            DocumentNavigator
 # file_chunk_feeder   SequentialChunkFeeder
+# document_processor  DocumentProcessor
 # string_file         SharedStringFile
 # special_strings     SpecialStringSubstitutionProcessor
+# (multiple instances)TemporaryFile
 # zip                 DocumentArchive
 # csv_data            IncomingDataSource
 
@@ -59,8 +62,9 @@ import datetime
 import cgi
 
 class ApplicationController:
+    '''This class is responsible for reading user options and communicating options to the program.'''
 
-    VERSION = "2.02"
+    VERSION = "2.03"
 
     # default properties
     quiet = 0             # show no output
@@ -73,11 +77,10 @@ class ApplicationController:
     start = 1             # begin at this row of the csv file (allows you to skip some rows)
     end = None            # end of this row of the csv file
     header_from_csv = 0   # insert the first row of the csv file as the header
-    colSkips = 0          # the number of columns skipped in the column order
     rowSkips = 0          # number of rows at the top of document to skip over, header is the next row
+    append = 0            # append data to existing rows instead of inserting at normal point
     table = 1             # the table number where data will be inserted
     target_row = 2        # the row number where data will be inserted
-    option_row_offset = 0 # integer to adjust table 1 when options are present
     delimiter = ","       # delimiter in csv file
     dateformat = ""       # the expected date format in csv data to convert to native format
     order = []            # column order list
@@ -87,6 +90,7 @@ class ApplicationController:
     out_filename = ""     # the name of the output file
     comment = ""          # comment string that might be inserted into the document
     debug = 0             # turn on extra debugging information
+    max_buffer = 20E6     # maximum size for buffers before creating temporary files
 
     def help(self):
         print("Usage: csv2odf [option] [<csvfile>] <templatefile> [<outputfile>]")
@@ -169,15 +173,17 @@ class ApplicationController:
         print("OPTIONS FOR PROCESSING TEMPLATE FILE")
         print("-H     insert the first csv row into the header")
         print("")
-        print("--comment=<text>")
-        print("       replace [csv2odf-comment] within the document with <text>")
-        print("")
         print("-S <n> skip  the  first n rows of the template file, the header will be")
         print("       the next row after those skipped")
         print("")
         print("-t <n> specify which tab or table to add data to, default first  table.")
         print("       For  html  files, -t may be followed by a name to match to table")
         print("       id property.")
+        print("")
+        print("-a     append csv data to the end of existing data")
+        print("")
+        print("--comment=<text>")
+        print("       replace [csv2odf-comment] within the document with <text>")
         print("")
         print("--div  Search  for  <div>  tags  instead  of <table> (html files only).")
         print("       <div> tags must be nested with levels for table, row, and cell.")
@@ -230,7 +236,7 @@ class ApplicationController:
         print("-z     display debugging information")
 
     def datehelp(self):
-        '''Display codes for use with -d option'''
+        '''Display codes for use with -D option'''
         print("These codes may be used with the -d option.")
         print("%a     Locale's abbreviated weekday name.")
         print("%A     Locale's full weekday name.")
@@ -310,15 +316,27 @@ class ApplicationController:
     def parse_args(self, arguments):
         '''parse an argument string'''
         EN_DASH = '–'
+        LEFT_DOUBLE_QUOTE = '“'
+        RIGHT_DOUBLE_QUOTE = '”'
+        LEFT_SINGLE_QUOTE = '‘'
+        RIGHT_SINGLE_QUOTE = '’'
         if isinstance(arguments, str):  # if arguments is a string, split it into a list.
             arguments = arguments.replace(EN_DASH, '--')  # openoffice may sometimes replace a double-dash with an en-dash (unicode 2013), change it to double-dash.
+            arguments = arguments.replace(LEFT_DOUBLE_QUOTE, '"')
+            arguments = arguments.replace(RIGHT_DOUBLE_QUOTE, '"')
+            arguments = arguments.replace(LEFT_SINGLE_QUOTE, "'")
+            arguments = arguments.replace(RIGHT_SINGLE_QUOTE, "'")
             arguments = shlex.split(arguments)
         elif sys.version_info[0] == 2 and isinstance(arguments, unicode):  # if arguments is a unicode string, split it into a list.
-            arguments = arguments.replace(EN_DASH.decode('utf-8'), '--').encode()  # openoffice may sometimes replace a double-dash with an en-dash (unicode 2013), change it to double-dash.
-            arguments = shlex.split(arguments)
+            arguments = arguments.replace(EN_DASH.decode('utf-8'), '--')  # openoffice may sometimes replace a double-dash with an en-dash (unicode 2013), change it to double-dash.
+            arguments = arguments.replace(LEFT_DOUBLE_QUOTE.decode('utf-8'), '"')
+            arguments = arguments.replace(RIGHT_DOUBLE_QUOTE.decode('utf-8'), '"')
+            arguments = arguments.replace(LEFT_SINGLE_QUOTE.decode('utf-8'), "'")
+            arguments = arguments.replace(RIGHT_SINGLE_QUOTE.decode('utf-8'), "'")
+            arguments = shlex.split(arguments.encode())
         # else: arguments is alread a list, no action required
         try:
-            optionlist, argumentlist = getopt.gnu_getopt(arguments, "hHqvxnVzs:t:e:c:Dd:S:o:",
+            optionlist, argumentlist = getopt.gnu_getopt(arguments, "ahHqvxnVzs:t:e:c:Dd:S:o:",
                 ["input=", "template=", "output=", "comment=", "div",
                     "template-stdin-ods", "template-stdin-odt", "template-stdin-html",
                     "template-stdin-xlsx", "template-stdin-docx"])
@@ -327,7 +345,10 @@ class ApplicationController:
             self.help()
             sys.exit(1)
         for o, a in optionlist:
-            if o == "-h": self.showhelp = 1
+            if o == "-a":
+                self.append = 1
+                self.target_row = -9  # this will be changed when the end of target table is found
+            elif o == "-h": self.showhelp = 1
             elif o == "-q": self.quiet = 1
             elif o == "-v": self.verbose = 1
             elif o == "-x": self.xml = 1
@@ -342,9 +363,6 @@ class ApplicationController:
                 self.stop("version "+self.VERSION)
             elif o == "-o":
                 self.order = list(map( self.int_minus_1, a.split(",") ))
-                for i in range(len(self.order)):
-                    if self.order[i] is None:
-                        self.colSkips += 1
             elif o == "-D":
                 self.warning("outputting help for date codes.")
                 self.datehelp()
@@ -496,31 +514,51 @@ class ApplicationController:
             self.stop("Error: Could not identify the template file type.", 1)
 
 
-    def __init__(self):
-        self.get_args()
+    def __init__(self, debug=0):
+        if not debug:
+            self.get_args()
 
     # end class ApplicationController
 
 
 class DocumentModel:
     '''Regular expressions used to identify parts of a document file'''
-    
+
     document_type = None
-    
+
+    ods_tag_regex_substrings = ['(<(office:document-content)[^>]*>)',  # group 1, 2: namespace
+        '|(<table:table>|<table:table [^>]*>|<office:chart[^>]*>)',    # group 3: table start
+        '|(<table:table-row>|<table:table-row [^>]*>|<table:table-header-row>',  # group 4: row start
+        '|<table:table-header-row [^>]+>|<table:database-ranges[^>]*>|<table:shapes[^>]*>',
+        '|<chart:chart [^>]*>|<calcext:conditional-formats[^>]*>)',
+        '|(</table:table-row>|</table:table-header-row>|</table:database-ranges>|</table:shapes>', # group 5: row end
+        '|</chart:chart>|</calcext:conditional-formats>)',
+        '|(</table:table>|</office:chart>)' ]  # group 6: table end
+    odt_tag_regex_substrings = ['(<(office:document-content)[^>]*>)',  # group 1, 2: namespace
+        '|(<table:table>|<table:table [^>]*>)',   # group 3: table start
+        '|(<table:table-row>|<table:table-row [^>]*>|<table:table-header-row>|<table:table-header-row [^>]+>)',  # group 4: row start
+        '|(</table:table-row>|</table:table-header-row>)',  # group 5: row end
+        '|(</table:table>)']  # group 6: table end
+    xlsx_tag_regex_substrings = ['(<(worksheet|workbook |c:chartSpace)[^>]*>)',
+        '|(<sheetData[^>]*>|<workbook [^>]*>|<c:lineChart>)',
+        '|(<row[^/>]*>|<definedNames>|<c:ser>)',
+        '|(</row>|</definedNames>|</c:ser>)',
+        '|(</sheetData>|</workbook>|</c:lineChart>)' ]
+
     model = {
         'ods': {
-            r'tag-regex': r'(<(office:document-content)[^>]*>)|(<table:table>|<table:table [^>]*>|<office:chart[^>]*>)|(<table:table-row>|<table:table-row [^>]*>|<table:table-header-row>|<table:table-header-row [^>]+>|<table:database-ranges[^>]*>|<table:shapes[^>]*>|<chart:chart [^>]*>)|(</table:table-row>|</table:table-header-row>|</table:database-ranges>|</table:shapes>|</chart:chart>)|(</table:table>|</office:chart>)',
-            #               group 1, 2: namespace               group 3: table start                group 4: row start                                                                                                                                      group 5: row end                                                                        group 6: table end
+            'tag-regex': r''.join(ods_tag_regex_substrings),
             'table_regex': r'^table:table$',
             'table-name-attribname': 'table:name',
             'row-tagname': 'table:table-row',
             'row-prototype': '<table:table-row/>',
-            'cell-regex': r'^table:table-cell$',                
-            'cell-tagname': ['table:table-cell','table:database-range', 'draw:object'],
+            'cell-regex': r'^table:table-cell$',
+            'cell-tagname': ['table:table-cell','table:database-range', 'draw:object', 'calcext:conditional-format'],
             'textnode-regex': r'^text:p$',
             'textnode-tagname': 'text:p',
             'formula-regex': r'^table:formula$',
-            'formula-tagname': ['table:formula', 'table:target-range-address','draw:notify-on-update-of-ranges'],
+            'formula-tagname': ['table:formula', 'table:target-range-address', 'draw:notify-on-update-of-ranges',
+                                'calcext:target-range-address'],
             'value-attribname': 'office:value',
             'date-attribname': 'office:date-value',
             'chartref-regex': r'^draw:object$',
@@ -529,9 +567,9 @@ class DocumentModel:
             'filter-regex': r'^table:database-ranges$',
             'inner_filename_regex': r'content.xml|Object [0-9]{1,3}/content.xml',
             'target_filename_regex': r'^content.xml'},
-        
+
         'odt': {
-            'tag-regex': r'(<(office:document-content)[^>]*>)|(<table:table>|<table:table [^>]*>)|(<table:table-row>|<table:table-row [^>]*>|<table:table-header-row>|<table:table-header-row [^>]+>)|(</table:table-row>|</table:table-header-row>)|(</table:table>)',
+            'tag-regex': r''.join(odt_tag_regex_substrings),
             'table_regex': r'^table:table$',
             'table-name-attribname': None,
             'row-regex': r'</{0,1}table:table-row[^>]*>|</{0,1}table:table-header-row[^>]*>',
@@ -551,7 +589,7 @@ class DocumentModel:
             'filter-regex': None,
             'inner_filename_regex': r'content.xml',
             'target_filename_regex': r'content.xml' },
-        
+
         'html-table': {
             'tag-regex': r'(<(html)[^>]*>)|(<table[^>]*>)|(<tr[^>]*>)|(</tr>)|(</table>)',
             'table_regex': r'^table$',
@@ -572,7 +610,7 @@ class DocumentModel:
             'filter-regex': None,
             'inner_filename_regex': None,
             'target_filename_regex': None },
-        
+
         'html-div': {
             'tag-regex': r'(<(html)[^>]*>)|(<div[^>]*id=[^>]*>)|(<div[^>]*>)|(</div>)|(</div>)',
             'table_regex': r'^div$',
@@ -593,9 +631,9 @@ class DocumentModel:
             'filter-regex': None,
             'inner_filename_regex': None,
             'target_filename_regex': None },
-        
+
         'xlsx': {
-            'tag-regex': r'(<(worksheet|workbook |c:chartSpace)[^>]*>)|(<sheetData[^>]*>|<workbook [^>]*>|<c:lineChart>)|(<row[^/>]*>|<definedNames>|<c:ser>)|(</row>|</definedNames>|</c:ser>)|(</sheetData>|</workbook>|</c:lineChart>)',
+            'tag-regex': r''.join(xlsx_tag_regex_substrings),
             'table_regex': r'^sheetData$',
             'table-name-attribname': '',
             'row-tagname': 'row',
@@ -612,9 +650,10 @@ class DocumentModel:
             'chartRefNotifyRange-regex': None,
             'chartRefLink-regex': None,
             'filter-regex': r'^autoFilter$',
-            'inner_filename_regex': r"xl/worksheets/sheet[0-9]+\.xml|xl/sharedStrings\.xml|xl/workbook\.xml|xl/charts/chart[0-9]+\.xml",
+            'inner_filename_regex':
+                r"xl/worksheets/sheet[0-9]+\.xml|xl/sharedStrings\.xml|xl/styles\.xml|xl/workbook\.xml|xl/charts/chart[0-9]+\.xml",
             'target_filename_regex': r'xl/worksheets/sheet[0-9]+\.xml' },
-        
+
         'docx': {
             'tag-regex': r'(<(w:document)[^>]*>)|(<w:tbl [^>]*>|<w:tbl>)|(<w:tr[^>]*>)|(</w:tr>)|(</w:tbl>)',
             'table_regex': r'^w:tbl$',
@@ -635,8 +674,8 @@ class DocumentModel:
             'filter-regex': None,
             'inner_filename_regex': r'word/document\.xml',
             'target_filename_regex': r'word/document\.xml'}
-    }    
-    
+    }
+
     def __init__(self, app):
         if app.doctype == 'html':
             if app.div:
@@ -645,10 +684,10 @@ class DocumentModel:
                 self.document_type = 'html-table'
         else:
             self.document_type = app.doctype
-            
+
     def tag_regex(self):
         return self.model[self.document_type]['tag-regex']
-    
+
     def table_regex(self):
         return self.model[self.document_type]['table_regex']
 
@@ -681,7 +720,7 @@ class DocumentModel:
 
     def formula_attribname(self):
         return self.model[self.document_type]['formula-tagname']
-    
+
     def value_attribname(self):
         return self.model[self.document_type]['value-attribname']
 
@@ -707,99 +746,455 @@ class DocumentModel:
         return self.model[self.document_type]["target_filename_regex"]
 
     # end class DocumentModel
-    
+
+
+class DocumentNavigator:
+
+    app = None                # app object provides options from the user
+    document_type = None      # type like ods, odt, xlsx, etc.
+    file_name = None          # name of the current inner file
+    in_target_file = False    # true when in target file
+    target_table_num = None   # number of target table
+    target_table_name = None  # name of target table
+    table_name = None         # table name of current table
+    table_1_name = None       # name of table 1
+    table_num = 0             # tab number of current tab
+    table_depth = 0           # rab depth, tracks nested rows
+    header_row_num = 1        # row num of the header in target table
+    template_row_num = 2      # the row that will be used as a template
+    insert_row_num = 2        # the row to insert data into
+    num_insert_rows = 0       # the number of csv data rows to be inserted
+    num_inserted_rows = 0     # the number of csv data rows that have been inserted
+    in_row_num = 0            # current template row number
+    before_row_1 = True       # true when row 1 has not been processed
+    option_row_offset = 0     # integer to adjust table 1 when options are present
+    append_offset = 0         # offset after entering append mode
+    row_depth = 0             # row depth, tracks nested rows
+    before_template_row = True  # set to false when insert row found
+    LETTER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+    def __init__(self, app):
+        self.app = app
+        self.set_params()
+
+    #-- set values --
+
+    def set_num_insert_rows(self, num_insert_rows):
+        self.num_insert_rows = num_insert_rows
+
+    def set_params(self):
+        '''set paramter from the app class'''
+        if isinstance(self.app.table, str):
+            self.target_table_name = self.app.table
+        else:
+            self.target_table_num = self.app.table
+        self.template_row_num = self.app.target_row
+        self.insert_row_num = self.app.target_row
+        self.document_type = self.app.doctype
+
+    def new_file(self, name):
+        self.file_name = name
+        self.reset()
+
+    def reset(self):
+        '''Go to beginning of current file'''
+        self.table_name = None
+        self.table_num = 0
+        self.table_depth = 0
+        self.num_inserted_rows = 0
+        self.in_row_num = 0
+        self.row_depth = 0
+
+    def next_table(self):
+        self.table_depth += 1
+        if self.table_depth == 1:
+            self.table_num += 1
+            self.table_name = None
+            self.in_row_num = 0
+            self.row_depth = 0
+
+    def end_table(self):
+        self.table_depth -= 1
+        if self.table_depth == 0:
+            self.in_row_num = 0
+            self.row_depth = 0
+
+    def next_row(self):
+        self.row_depth += 1
+        if self.table_depth == 1 and self.row_depth == 1:
+            self.in_row_num += 1
+            if self.before_row_1 and self.in_row_num > 1:
+                self.before_row_1 = False
+
+    def set_in_row_num(self, in_row_num):
+        self.in_row_num = int(in_row_num)
+
+    def next_data_row(self):
+        self.num_inserted_rows += 1
+
+    def generate_row(self):
+        self.in_row_num += 1
+        self.row_depth = 1
+
+    def end_row(self):
+        if self.row_depth == 0:
+            if self.table_depth >= 1:  # for some tags, the rowend and tableend tags are the same, this handles that condition.
+                self.end_table()
+        else:
+            self.row_depth -= 1
+
+    def set_table_name(self, name, num=None):
+        if num:
+            self.table_num = num
+        self.table_name = name
+        if self.table_num == 1:
+            self.table_1_name = name
+        if (self.target_table_name is None and self.target_table_num is not None
+            and self.table_num == self.target_table_num):
+            self.target_table_name = name
+
+    def set_target_table_name(self, name):
+        self.target_table_name = name
+
+    def set_in_target_file(self, in_target_file):
+        self.in_target_file = in_target_file
+
+    def set_in_template_row(self):
+        if self.app.append:
+            self.template_row_num = self.in_row_num
+            self.insert_row_num = self.in_row_num + 1
+            self.append_offset = 1
+        self.before_template_row = False
+
+    def subtract_option_row(self):
+        if self.in_row_num == 1:
+            self.option_row_offset = -1
+            self.before_row_1 = False
+            self.template_row_num += 1
+            self.insert_row_num += 1
+
+    #-- test values --
+
+    def in_target_table(self):
+        if self.app.doctype == 'xlsx':
+            return self.in_target_file
+        else:
+            return self.in_target_file and self.table_depth == 1 and (
+                (self.target_table_num is not None and self.table_num == self.target_table_num)
+                or (self.target_table_name is not None and self.table_name == self.target_table_name))
+
+    def refers_to_target_table(self, table_name=None):
+        if table_name:  # it could be None
+            return table_name == self.target_table_name
+        else:
+            return self.in_target_table()
+
+    def in_table_1(self):
+        return self.table_num == 1 and (
+            self.file_name in ('content.xml', 'xl/worksheets/sheet1.xml', 'word/document.xml')
+            or self.document_type == 'html')
+
+    def refers_to_table_1(self, table_name):
+        if table_name:  # it could be None
+            return table_name == self.table_1_name
+        else:
+            return self.in_table_1()
+
+    def table_depth_1(self):
+        return self.table_depth == 1
+
+    def in_row_depth_1(self):
+        return self.row_depth == 1
+
+    def in_row(self):
+        return self.row_depth >= 1
+
+    def in_row_num_1(self):
+        return self.in_row_num == 1 and self.before_row_1 and self.in_table_1()
+
+    def in_header_row(self):
+        return (self.in_target_table()
+                and self.in_row_num == self.template_row_num - 1
+                and self.row_depth == 1)
+
+    def in_template_row(self):
+        if (self.in_target_table() and self.in_row_num == self.template_row_num
+            and self.row_depth == 1):
+            self.before_template_row = False
+            return True
+        else:
+            return False
+
+    def is_before_template_row(self):
+        return self.before_template_row
+
+    def is_at_or_before_template_row(self):
+        return self.in_row_num <= self.template_row_num
+
+    def in_insert_row(self):
+        return self.in_target_table() and self.in_row_num == self.insert_row_num and self.row_depth == 1
+
+    def refers_to_insert_row(self, row, table=None):
+        return self.refers_to_target_table(table) and row == self.insert_row_num and self.insert_row_num > 0
+
+    def after_insert_row(self):
+        return self.refers_to_target_table() and self.in_row_num > self.insert_row_num and self.insert_row_num > 0
+
+    def refers_to_after_insert_row(self, row, table=None):
+        return self.refers_to_target_table(table) and row > self.insert_row_num and self.insert_row_num > 0
+
+    #-- return values --
+
+    def out_row_num(self, data_row_index=0):
+        '''
+        How out_row_num changes relative to in_row_num:
+        In row num
+        | Before/Target/After
+        | | Data row index
+        | | | Out row num
+        | | | |
+        1 B   1
+        2 B   2
+        3 B   3
+        4 T 0 4
+        4 T 1 5   out_row_num = in_row_num + data_row_index + option_row_offset
+        4 T 2 6
+        5 A   7
+        6 A   8
+        7 A   9
+        '''
+        if self.in_target_table():
+            return self.in_row_num + self.option_row_offset + self.append_offset + data_row_index
+        else:
+            return self.in_row_num + self.option_row_offset + self.append_offset
+
+    def output_row_num(self, row_num=None, data_row_index=None, table_name=None):
+        '''Calculate the output row num from given or current row num
+
+        Basic insert  Options row  Append   Header from template
+        ------------  -----------  ------   --------------------
+        1R  1R        1O           1R  1R   1R  1R
+        2R  2R        2R  1R       2R  2R   2R  2R
+        3H  3H        3R  2R       3H  3H   3H  3I
+        4T  4I        4H  3H       4T  4T   4T  4I
+        5R  5I        5T  4I       5R  5I   5R  5I
+        6R  6R        6R  5I       6R  6I   6R  6R
+            7R        7R  6R           7R       7R
+                          7R           8R
+        Key:
+        R=a row from the template
+        H=template header row
+        T=the template template row
+        I=inserted rows from csv
+        '''
+        if not row_num:
+            row_num = self.in_row_num
+        if self.refers_to_target_table(table_name):
+            # --- set header_row_offset
+            if row_num < self.template_row_num - 1:
+                header_row_offset = 0
+            else:
+                if self.app.header_from_csv:
+                    header_row_offset = -1  # subtrace 1 because the header from template is not used in the output
+                else:
+                    header_row_offset = 0
+            # --- set template_row_offset
+            if self.before_template_row:
+                template_row_offset = 0
+            else:
+                if self.app.append:
+                    template_row_offset = 0
+                else:
+                    template_row_offset = -1  # subtract 1 because the template row is not used in the output
+            # --- set option_row_offset
+            if self.refers_to_table_1(table_name):
+                option_row_offset = self.option_row_offset
+            else:
+                option_row_offset = 0
+            # --- set data_row_offset
+            if self.refers_to_insert_row(row_num + self.append_offset, table_name):
+                if data_row_index is None:
+                    insert_rows_offset = self.num_insert_rows - 1
+                else:
+                    insert_rows_offset = data_row_index
+            elif self.refers_to_after_insert_row(row_num, table_name):
+                insert_rows_offset = self.num_insert_rows - 1
+            else:
+                insert_rows_offset = 0
+            return row_num + option_row_offset + template_row_offset + self.append_offset + insert_rows_offset
+        elif self.refers_to_table_1(table_name):
+            return row_num + self.option_row_offset
+        else:
+            return row_num
+
+    def col_letter(self, col_num):
+        '''Return spreadsheet column letter for a column number. 1=A 26=Z '''
+        if col_num > 18226:
+            self.app.stop("Error: Cannot handle more than 18226 columns", 1)
+        letter = self.LETTER[(col_num-1) % 26]
+        col_num = (col_num-1) // 26
+        if col_num == 0:
+            return letter
+        next_letter = self.LETTER[(col_num-1) % 26]
+        letter = ''.join([next_letter, letter])
+        col_num = (col_num-1) // 26
+        if col_num == 0:
+            return letter
+        next_letter = self.LETTER[(col_num-1) % 26]
+        letter = ''.join([next_letter, letter])
+        return letter
+
+    def describe(self):
+        output = "table["+str(self.table_num)
+        output += "("+str(self.table_name)+")"
+        output += " depth="+str(self.table_depth)
+        output += " target="+str(self.target_table_num)+"("+str(self.target_table_name)+")]"
+        output += " row[in="+str(self.in_row_num)
+        output += " out="+str(self.output_row_num())
+        output += " depth="+str(self.row_depth)
+        output += " before_template="+str(self.before_template_row)+"]"
+        output += " table1_nm="+str(self.table_1_name)
+        output += " file["+str(self.file_name)
+        output += " target="+str(self.in_target_file)
+        output += " type="+self.document_type+"]\n"
+        return output
+
+    # end class DocumentNavigator
+
+
+class StyleFileReader:
+
+    style_dom = None
+    is_date_cell_list = []
+
+    def __init__(self, file_text):
+        regex = re.compile('mm|dd|yy|hh|mm|ss')
+        style_dom = xml.dom.minidom.parseString(file_text)
+        is_date_format_code_list = {}
+        num_format_list = style_dom.firstChild.getElementsByTagName('numFmts')
+        if num_format_list:
+            format_code_elements = num_format_list[0].childNodes
+            for format_code_element in format_code_elements:
+                if format_code_element.hasAttribute('numFmtId') and format_code_element.hasAttribute('formatCode'):
+                    format_index = int(format_code_element.getAttribute('numFmtId'))
+                    format_code = format_code_element.getAttribute('formatCode')
+                    match = regex.search(format_code)
+                    if match:
+                        is_date_format_code_list[format_index] = True
+                    else:
+                        is_date_format_code_list[format_index] = False
+                else:
+                    is_date_format_code_list[format_index] = False
+            cell_format_elements = style_dom.firstChild.getElementsByTagName('cellXfs')[0].childNodes
+            for cell_format_element in cell_format_elements:
+                if cell_format_element.hasAttribute('numFmtId'):
+                    format_code_index = int(cell_format_element.getAttribute('numFmtId'))
+                    if format_code_index in is_date_format_code_list:
+                        self.is_date_cell_list.append(is_date_format_code_list[format_code_index])
+                    else:
+                        self.is_date_cell_list.append(False)
+                else:
+                    self.is_date_cell_list.append(False)
+
+    def is_a_date_cell(self, index):
+        try:
+            return self.is_date_cell_list[index]
+        except IndexError:
+            return False
+
 
 class CSVMergeProcessor:
     '''This object takes a row of csv data and merges it with an xml template row.'''
 
     #properties
-    app = None  # an application controller object
-    model = None  # an object with document tag search strings
+    app = None              # an application controller object
+    model = None            # an object with document tag search strings
+    position = None         # a position tracking class
+    style = None            # an object that can identify cell with date formatting
     formula_adjuster = None # an object that can adjust formula references
-    template_document = "" # template as document object model
-    template_elem = None # template row as document element
-    inner_files = [] # a list of zip file objects
-    string_file = None  # an object that handles the string file for xlsx
-    table_name = "" # the tab name of the table
-    last_row = 0 # the number of the last inserted data row
-    xlsx_sheet_count = 0 # the number of sheet in an xlsx doc
-    spool_max = 20e6 # max size of a temporary file before it is written to disk
-    formula_attrib_name_list = None
+    template_document = ""  # template as document object model
+    template_elem = None    # template row as document element
+    inner_files = []        # a list of zip file objects
+    string_file = None      # an object that handles the string file for xlsx
     value_attrib_name = None
     doctype = 'odf'
-    indexed_original_end = 0
     EPOCH = 693594 # ordinal equivalent of 1/1/1970
 
-    def __init__(self, app, model):
+    def __init__(self, app, model, position):
         self.app = app
         self.model = model
-        self.formula_adjuster = FormulaAdjustmentProcessor(app, model)
-        self.formula_attrib_name_list = self.model.formula_attribname()
+        self.position = position
+        self.formula_adjuster = FormulaAdjustmentProcessor(app, model, position)
         self.value_attrib_name = self.model.value_attribname()
         self.date_attrib_name = self.model.date_attribname()
 
     def set_template(self, template):
         self.template_document = template
         self.template_elem = self.template_document.getElementsByTagName(self.model.row_tagname())[0]
-    
-    def set_string_file(self, string_file):
+
+    def set_string_and_style_files(self, string_file, style_file):
         self.string_file = string_file
-        
+        self.style = style_file
+
     def set_num_insert_rows(self, num_insert_rows):
         self.formula_adjuster.num_insert_rows = num_insert_rows
 
     def dictionary_combine(self, dict1, dict2):
         return dict(itertools.chain(dict1.items(), dict2.items()))
 
-    def merge_row(self, data_row, sheet_row_number, formula_offset, in_table_1, in_target_table, in_target_row=False):
+    def merge_row(self, data_row, data_row_index):
         '''Inputs:
             data_row:        a list of csv data items
-            sheet_row_number: the row number were the row will be placed
-            formula_offset:  an integer that is added to formula cell addresses to adjust to added data row
+            data_row_index:  the index number of the data row, 1st row = 0
            Output:           a row of xml cell with csv data merged into it'''
         if self.app.debug:
-            sys.stderr.write("Sheet row: "+str(sheet_row_number)+"\n")
+            sys.stderr.write("Sheet row: "+str(self.position.out_row_num(data_row_index))+"\n")
         output_row = self.template_elem.cloneNode(True)
         while output_row.childNodes.length > 0:
             output_row.removeChild(output_row.lastChild)
         data_column_index = 0
         if self.app.doctype == 'xlsx':
-            if not output_row.hasAttribute('r'):                                                                      
+            if not output_row.hasAttribute('r'):
                 ref_node = self.template_document.createAttribute('r')
                 output_row.setAttributeNode(ref_node)
-            output_row.setAttribute('r', str(sheet_row_number))
+            output_row.setAttribute('r', str(self.position.out_row_num(data_row_index)))
         for node in self.template_elem.childNodes:
             new_node = node.cloneNode(True)
-            if new_node.hasChildNodes() and re.match(self.model.cell_regex(), node.nodeName):
-                if new_node.hasAttribute('table:number-columns-repeated'): # it's a compressed cell, expand it
-                    number_columns_repeated = int(new_node.getAttribute('table:number-columns-repeated'))
-                    new_node.removeAttribute('table:number-columns-repeated')
-                    data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
-                    merged_cell = self.merge_cell(new_node, data_item, sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, in_target_row, do_inject_value)
-                    output_row.appendChild(merged_cell)
-                    data_column_index += 1
-                    for j in range(number_columns_repeated - 1):
-                        additional_node = new_node.cloneNode(True)
-                        data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
-                        merged_cell = self.merge_cell(additional_node, data_item, sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, in_target_row, do_inject_value)
+            if re.match(self.model.cell_regex(), node.nodeName):
+                data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
+                if new_node.hasChildNodes():
+                    if new_node.hasAttribute('table:number-columns-repeated'): # it's a compressed cell, expand it
+                        number_columns_repeated = int(new_node.getAttribute('table:number-columns-repeated'))
+                        new_node.removeAttribute('table:number-columns-repeated')
+                        merged_cell = self.merge_cell(new_node, data_item, data_row_index,
+                                                    self.template_document, do_inject_value)
                         output_row.appendChild(merged_cell)
                         data_column_index += 1
-                else:
-                    data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
-                    merged_cell = self.merge_cell(new_node, data_item, sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, in_target_row, do_inject_value)
-                    output_row.appendChild(merged_cell)
+                        for j in range(number_columns_repeated - 1):
+                            additional_node = new_node.cloneNode(True)
+                            data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
+                            merged_cell = self.merge_cell(additional_node, data_item, data_row_index,
+                                                        self.template_document, do_inject_value)
+                            output_row.appendChild(merged_cell)
+                            data_column_index += 1
+                    else:
+                        merged_cell = self.merge_cell(new_node, data_item, data_row_index,
+                                                    self.template_document, do_inject_value)
+                        output_row.appendChild(merged_cell)
+                        data_column_index += 1
+                else:  # the node did not have a child node and is probably a dummy, create a valid cell
+                    new_cell = self.create_cell_node(data_item, self.template_document, data_column_index+1,
+                                                     self.position.out_row_num(data_row_index))
+                    output_row.appendChild(new_cell)
                     data_column_index += 1
-            else:
-                while self.app.doctype == 'ods' and data_column_index < len(data_row): # there is more data than template cells, append unformatted cells
-                    data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
-                    new_row = self.create_cell_node(data_item, data_column_index+1, sheet_row_number, self.template_document, in_table_1, in_target_table)
-                    output_row.appendChild(new_row)
-                    data_column_index += 1
-                output_row.appendChild(new_node) # this is where we reinsert the empty placeholder node
+            else:  # the node type was not recognized, just pass it thru
+                output_row.appendChild(new_node)
         while data_column_index < len(data_row): # there is more data than template cells, append unformatted cells
             data_item, do_inject_value = self.data_item_from_index(data_row, data_column_index)
-            output_row.appendChild(self.create_cell_node(data_item, data_column_index+1, sheet_row_number, self.template_document, in_table_1, in_target_table))
+            output_row.appendChild(self.create_cell_node(data_item, self.template_document, data_column_index+1,
+                                                         self.position.out_row_num(data_row_index)))
             data_column_index += 1
+        self.position.next_data_row()
         return output_row
 
     def data_item_from_index(self, data_row, i):
@@ -819,113 +1214,138 @@ class CSVMergeProcessor:
             data_item = data_item.decode('UTF-8')
         return data_item, do_inject_value
 
-    def merge_cell(self, template_cell, data_item, sheet_row_number, formula_offset, sheet, in_table_1, in_target_table, in_target_row, do_inject_value):
+    def merge_cell(self, template_cell, data_item, data_row_index, sheet, do_inject_value):
         '''Inputs:
             template_cell     a single cell used as the template, formatting is copied
             data_item         a string that will replace the text payload in the template_cell
-            sheet_row_number  the row number were the cell will be placed
-            formula_offset    an integer that is added to formula cell addresses
+            data_row_index    the index number of the data row, 1st row = 0
            Output:
             output_cell '''
+        output_cell = template_cell.cloneNode(True)
         if self.app.debug:
             sys.stderr.write(" in: " + template_cell.toxml()+"\n")
         if data_item is None:
             data_item = ""
-        output_cell = template_cell.cloneNode(True)
         if self.app.doctype in ['ods', 'odt']:
-            if output_cell.hasAttribute(self.date_attrib_name): # it's a date
-                output_cell.setAttribute(self.date_attrib_name, self.format_date(data_item))
-                output_cell.firstChild.firstChild.data = ""  # for a date, leave the cell text empty
-            self.formula_adjuster.adjust_cell(output_cell, in_table_1, in_target_table, in_target_row, formula_offset)
-            if do_inject_value:
-                if output_cell.hasAttribute(self.value_attrib_name):
-                    output_cell.setAttribute(self.value_attrib_name, data_item)
-                text_line_list = data_item.splitlines()
-                paragraph = output_cell.firstChild
-                paragraph_template = paragraph.cloneNode(True)
-                if not text_line_list: text_line_list = [""]
-                paragraph.firstChild.data = text_line_list[0]
-                for text_line in text_line_list[1:]:
-                    last_paragraph = paragraph_template.cloneNode(True)
-                    last_paragraph.firstChild.data = text_line  # put the value in the cell text
-                    output_cell.appendChild(last_paragraph)
+            output_cell = self.merge_cell_odf(template_cell, data_item, data_row_index, do_inject_value)
         elif self.app.doctype == 'xlsx':
-            self.formula_adjuster.adjust_cell(output_cell, in_table_1, in_target_table, in_target_row, formula_offset)
-            if do_inject_value:
-                value_list = output_cell.getElementsByTagName('v')
-                if value_list:
-                    cell_value = value_list[0]
-                    if output_cell.hasAttribute('t') and output_cell.getAttribute('t') == 's':  # it's a cell with a string
-                        index = cell_value.firstChild.data
-                        if self.string_file.is_a_date_cell(index):
-                            cell_value.firstChild.data = self.format_date(data_item)
-                            output_cell.removeAttribute('t')
-                        else:
-                            index = self.string_file.append(data_item)
-                            cell_value.firstChild.data = index
-                    else:
-                        cell_value.firstChild.data = data_item
+            output_cell = self.merge_cell_xlsx(template_cell, data_item, data_row_index, do_inject_value)
         elif self.app.doctype in ['html-table', 'html-div']:
-            if do_inject_value:
-                text_line_list = data_item.splitlines()
-                if not text_line_list: text_line_list = [""]
-                output_cell.firstChild.data = text_line_list[0]
-                for text_line in text_line_list[1:]:
-                    output_cell.appendChild(sheet.createElement("br"))
-                    output_cell.appendChild(sheet.createTextNode(text_line))
-        elif self.app.doctype == 'docx': 
-            if do_inject_value:
-                text_line_list = data_item.splitlines()
-                if not text_line_list: text_line_list = [""]
-                paragraph = output_cell.getElementsByTagName('w:p')[0]
-                text_node = paragraph.getElementsByTagName('w:t')[0]
-                paragraph_template = paragraph.cloneNode(True)
-                text_node.firstChild.data = text_line_list[0]
-                for text_line in text_line_list[1:]:
-                    last_paragraph = paragraph_template.cloneNode(True)
-                    text_node = last_paragraph.getElementsByTagName('w:t')[0]
-                    text_node.firstChild.data = text_line
-                    output_cell.appendChild(last_paragraph)
+            output_cell = self.merge_cell_html(template_cell, data_item, sheet, do_inject_value)
+        elif self.app.doctype == 'docx':
+            output_cell = self.merge_cell_docx(template_cell, data_item, do_inject_value)
         else:
             self.app.stop("Error: document type '"+self.app.doctype+"' is not recognized in merge_cell.", 1)
         if self.app.debug:
             sys.stderr.write("out: " + output_cell.toxml()+"\n")
         return output_cell
-    
-    def adjust_row(self, row_dom, in_table_1, in_target_table, in_target_row=False, data_row_index=0):
+
+    def merge_cell_odf(self, template_cell, data_item, data_row_index, do_inject_value):
+        output_cell = template_cell.cloneNode(True)
+        if output_cell.hasAttribute(self.date_attrib_name): # it's a date
+            if data_item:
+                data_item = self.format_date(data_item)
+            output_cell.setAttribute(self.date_attrib_name, data_item)
+            output_cell.firstChild.firstChild.data = ""  # for a date, leave the cell text empty
+        self.formula_adjuster.adjust_cell(output_cell, data_row_index)
+        if do_inject_value:
+            if output_cell.hasAttribute(self.value_attrib_name):
+                output_cell.setAttribute(self.value_attrib_name, data_item)
+            text_line_list = data_item.splitlines()
+            paragraph = output_cell.firstChild
+            while output_cell.childNodes.length > 1:
+                output_cell.removeChild(output_cell.lastChild)
+            paragraph_template = paragraph.cloneNode(True)
+            if not text_line_list: text_line_list = [""]
+            paragraph.firstChild.data = text_line_list[0]
+            for text_line in text_line_list[1:]:
+                last_paragraph = paragraph_template.cloneNode(True)
+                last_paragraph.firstChild.data = text_line  # put the value in the cell text
+                output_cell.appendChild(last_paragraph)
+        return output_cell
+
+    def merge_cell_xlsx(self, template_cell, data_item, data_row_index, do_inject_value):
+        output_cell = template_cell.cloneNode(True)
+        self.formula_adjuster.adjust_cell(output_cell, data_row_index)
+        if do_inject_value:
+            value_list = output_cell.getElementsByTagName('v')
+            if value_list:
+                cell_value = value_list[0]
+                if output_cell.hasAttribute('t') and output_cell.getAttribute('t') == 's':  # it's a cell with a string
+                    index = self.string_file.append(data_item)
+                    cell_value.firstChild.data = index
+                else:
+                    if output_cell.hasAttribute('s'):
+                        style_index = int(output_cell.getAttribute('s'))
+                        if self.style.is_a_date_cell(style_index):  # it's a date cell
+                            if self.app.debug:
+                                sys.stderr.write("Date: "+data_item+" = "+str(self.format_date(data_item)+"\n"))
+                            cell_value.firstChild.data = self.format_date(data_item)
+                        else:
+                            cell_value.firstChild.data = data_item  # it's a number cell
+                    else:
+                        cell_value.firstChild.data = data_item  # it's a number cell
+        return output_cell
+
+    def merge_cell_html(self, template_cell, data_item, sheet, do_inject_value):
+        output_cell = template_cell.cloneNode(True)
+        if do_inject_value:
+            text_line_list = data_item.splitlines()
+            if not text_line_list: text_line_list = [""]
+            output_cell.firstChild.data = text_line_list[0]
+            for text_line in text_line_list[1:]:
+                output_cell.appendChild(sheet.createElement("br"))
+                output_cell.appendChild(sheet.createTextNode(text_line))
+        return output_cell
+
+    def merge_cell_docx(self, template_cell, data_item, do_inject_value):
+        output_cell = template_cell.cloneNode(True)
+        if do_inject_value:
+            text_line_list = data_item.splitlines()
+            if not text_line_list: text_line_list = [""]
+            paragraph = output_cell.getElementsByTagName('w:p')[0]
+            text_node = paragraph.getElementsByTagName('w:t')[0]
+            paragraph_template = paragraph.cloneNode(True)
+            text_node.firstChild.data = text_line_list[0]
+            for text_line in text_line_list[1:]:
+                last_paragraph = paragraph_template.cloneNode(True)
+                text_node = last_paragraph.getElementsByTagName('w:t')[0]
+                text_node.firstChild.data = text_line
+                output_cell.appendChild(last_paragraph)
+        return output_cell
+
+    def adjust_row(self, row_dom, data_row_index=0):
         '''transfer to formula_adjuster to adjust the formulas in a row'''
         if row_dom.getElementsByTagName('chart:chart'):
             self.formula_adjuster.adjust_chart(row_dom)
         else:
-            self.formula_adjuster.adjust_row(row_dom, in_table_1, in_target_table, in_target_row, data_row_index)
-        
-    def null_row(self, data_row, sheet_row_number, formula_offset, in_target_table):
+            self.formula_adjuster.adjust_row(row_dom, data_row_index)
+
+    def null_row(self, data_row_index):
         '''delete the values in the template because there is no data to insert.
            Inputs:
-            sheet_row_number: the row number were the row will be placed
-            formula_offset:  an integer that is added to formula cell addresses
+            data_row_index:  the index number of the data row, 1st row = 0
            Output:           a row of xml cell with csv data merged into it'''
-        if self.app.debug:
-            sys.stderr.write("Data_row "+str(sheet_row_number)+"\n")
         output_row = self.template_elem.cloneNode(True)
         while output_row.childNodes.length > 0:
             output_row.removeChild(output_row.lastChild)
         if self.app.doctype == 'xlsx' and output_row.hasAttribute('r'):
-            output_row.setAttribute('r', str(sheet_row_number))
+            output_row.setAttribute('r', str(self.position.out_row_num(data_row_index)))
         for node in self.template_elem.childNodes:
             new_node = node.cloneNode(True)
             if new_node.hasChildNodes() and re.match(self.model.cell_regex(), node.nodeName):
                 if new_node.hasAttribute('table:number-columns-repeated'): # it's a compressed cell, expand it
                     number_columns_repeated = int(new_node.getAttribute('table:number-columns-repeated'))
                     new_node.removeAttribute('table:number-columns-repeated')
-                    merged_cell = self.merge_cell(new_node, "", sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, False, False)
+                    merged_cell = self.merge_cell(new_node, "", data_row_index, self.template_document, False)
                     output_row.appendChild(merged_cell)
                     for j in range(number_columns_repeated - 1):
                         additional_node = new_node.cloneNode(True)
-                        merged_cell = self.merge_cell(additional_node, "", sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, False, False)
+                        merged_cell = self.merge_cell(additional_node, "", data_row_index,
+                                                      self.template_document, False)
                         output_row.appendChild(merged_cell)
                 else:
-                    merged_cell = self.merge_cell(new_node, "", sheet_row_number, formula_offset, self.template_document, in_table_1, in_target_table, False, False)
+                    merged_cell = self.merge_cell(new_node, "", data_row_index, self.template_document, False)
                     output_row.appendChild(merged_cell)
             else:
                 output_row.appendChild(new_node) # this is where we reinsert the empty placeholder node
@@ -937,26 +1357,28 @@ class CSVMergeProcessor:
             try:
                 date = datetime.datetime.strptime(date_in, self.app.dateformat)
             except ValueError:
-                self.app.stop("The date format"+" ["+self.app.dateformat+"] "+"could not be interpreted for data: "+date_in, 1)
+                self.app.stop("The date format ["+self.app.dateformat
+                              +"] could not be interpreted for data: "+date_in, 1)
             if self.app.doctype == 'xlsx':
-                return str(date.toordinal() - self.EPOCH + 1.0*date.time().hour/24 + 1.0*date.time().minute/1440)
+                return str(date.toordinal() - self.EPOCH + 1.0*date.time().hour/24
+                           + 1.0*date.time().minute/1440)
             else:
                 return date.strftime('%Y-%m-%dT%H:%M:%S')
         else:  # if no format string is provided, we assusme the data is already in the correct format.
             return date_in
 
-    def create_cell_node(self, data_string, column_number, row_number, content, in_table_1, in_target_table):
+    def create_cell_node(self, data_string, content, column_number, row_number=1):
         new_cell_node = content.createElement(self.model.cell_tagname(0)[0])
         if self.app.doctype == 'xlsx':
+            index = str(self.string_file.append(data_string))
             if self.model.textnode_regex() is None:
-                new_cell_node.appendChild(content.createTextNode(data_string))
+                new_cell_node.appendChild(content.createTextNode(index))
             else:
                 new_text_node = content.createElement(self.model.textnode_tagname())
-                new_text_node.appendChild(content.createTextNode(data_string))
+                new_text_node.appendChild(content.createTextNode(index))
                 new_cell_node.appendChild(new_text_node)
             new_cell_node.setAttribute('t', 's')
             new_cell_node.setAttribute('r', self.column_letter(column_number)+str(row_number))
-            new_cell_node = self.merge_cell(new_cell_node, data_string, row_number, 0, content, in_table_1, in_target_table, False, True)
         else:
             if self.model.textnode_regex() is None:
                 new_cell_node.appendChild(content.createTextNode(data_string))
@@ -966,6 +1388,8 @@ class CSVMergeProcessor:
                     new_text_node = content.createElement(self.model.textnode_tagname())
                     new_text_node.appendChild(content.createTextNode(data_item))
                     new_cell_node.appendChild(new_text_node)
+        if self.app.debug:
+            sys.stderr.write("Created cell: "+new_cell_node.toxml()+"\n")
         return new_cell_node
 
     def column_letter(self, n):
@@ -995,28 +1419,29 @@ class CSVMergeProcessor:
 
 class FormulaAdjustmentProcessor:
     '''adjust formlas to point correctly to inserted data'''
-    
+
     app = None               # application controller
     model = None             # an object with search patterns for the type of in_file being scanned
+    position = None          # a position tracking class
     enabled = True           # set to false to disable adjustments
-    target_table_num = 1     # the table where data will be inserted
-    target_table_name = None # table name with ! on end
-    table_1_name = None      # the name of table 1
     num_insert_rows = 0      # the number of rows to be inserted
     formula_attrib_name = None # the name of the formaula attribute in the xml tag
     value_attrib_name = None # the name of the value attribute in the xml tag
     formula_regex = None     # compiled reges for formulas
     ODT_FORMULA_REGEX_STRING = r"<(~){0}(~){0}([a-zA-Z]{1,3})([0-9]+)(~){0}(~){0}(~){0}(~){0}>"
     XLSX_LOCATION_REGEX_STRING = r"([A-Z]*)([0-9]+)"
-    FORMULA_REGEX_STRING =  r"(([a-zA-Z]+)[!\.]){0,1}(\${0,1}[a-zA-Z]{1,3}\${0,1})([0-9]+)(:(([a-zA-Z]+)[!\.]){0,1}(\${0,1}[a-zA-Z]{1,3}\${0,1})([0-9]+)){0,1}"
-    #                           table name                    letter               number  : table name                   letter               number
-    #               group:    1    2                            3                    4     5 6   7                          8                      9
+    formula_regex_string_substrings = ["(([^\\/\?\*\[\]\(\):]+)[!\.]){0,1}",  # group 1, 2 table name
+        "(\${0,1}[a-zA-Z]{1,3}\${0,1})",  # group 3 letter
+        "([0-9]+)",  # group 4 number
+        "(:(([^\\/\?\*\[\]\(\):]*)[!\.]){0,1}",  # group 5 :, group 6, 7 table name
+        "(\${0,1}[a-zA-Z]{1,3}\${0,1})",  # group 8 letter
+        "([0-9]+)){0,1}"]  # group 9 number
+    FORMULA_REGEX_STRING =  r"".join(formula_regex_string_substrings)
 
-    def __init__(self, app, model):
+    def __init__(self, app, model, position):
         self.app = app
         self.model = model
-        self.target_table_num = self.app.table
-        self.formula_regex = re.compile(self.FORMULA_REGEX_STRING)
+        self.position = position
         self.xlsx_location_regex = re.compile(self.XLSX_LOCATION_REGEX_STRING)
         self.formula_attrib_name_list = self.model.formula_attribname()
         self.value_attrib_name = self.model.value_attribname()
@@ -1024,59 +1449,59 @@ class FormulaAdjustmentProcessor:
             self.formula_regex = re.compile(self.ODT_FORMULA_REGEX_STRING)
         else:
             self.formula_regex = re.compile(self.FORMULA_REGEX_STRING)
-        
-    def set_target_table_name(self, name):
-        self.target_table_name = name
-    
+
     def set_num_insert_rows(self, num_insert_rows):
         self.num_insert_rows = num_insert_rows
-        
-    def adjust_row(self, row_dom, in_table_1, in_target_table, in_target_row=False, data_row_index=0):
+
+    def adjust_row(self, row_dom, data_row_index=0):
         '''locate the cells in each row and adjust formulas.'''
         if self.enabled:
             if self.app.doctype == 'xlsx':
-                self.adjust_xlsx_location(row_dom.firstChild.firstChild, in_table_1, data_row_index)  # adjust the row tag
+                if self.position.in_insert_row():
+                    self.adjust_xlsx_location(row_dom.firstChild.firstChild, data_row_index)
+                else:
+                    self.adjust_xlsx_location(row_dom.firstChild.firstChild)
             for cell_tagname in self.model.cell_tagname():
                 cell_list = row_dom.getElementsByTagName(cell_tagname)
                 for cell in cell_list:
-                    self.adjust_cell(cell, in_table_1, in_target_table, in_target_row, data_row_index)
-                    
-    def adjust_cell(self, cell_dom, in_table_1, in_target_table, in_target_row=False, data_row_index=0):
+                    self.adjust_cell(cell, data_row_index)
+
+    def adjust_cell(self, cell_dom, data_row_index=0):
         '''if cell has formula, send for adjustment, clear other attributes so cell will be recalculated.'''
         if self.enabled:
             if self.app.doctype == 'xlsx':
                 has_formula = False
                 for child in cell_dom.childNodes:
-                    if isinstance(child, xml.dom.minidom.Element) and  child.tagName in ['f', 'c:f']:
+                    if isinstance(child, xml.dom.minidom.Element) and child.tagName in ['f', 'c:f']:
                         if child.hasChildNodes():
                             has_formula = True
                             formula = child.firstChild.data
-                            formula = self.adjust_formula(formula, in_table_1, in_target_table, in_target_row, data_row_index)
+                            formula = self.adjust_formula(formula, data_row_index)
                             child.firstChild.data = formula
                         if child.hasAttribute("ref"):
                             has_formula = True
                             formula = child.getAttribute("ref")
-                            formula = self.adjust_formula(formula, in_table_1, in_target_table, in_target_row, data_row_index)
+                            formula = self.adjust_formula(formula, data_row_index)
                             child.setAttribute("ref", formula)
                     elif isinstance(child, xml.dom.minidom.Text):  # this happens in data ranges in workbook.xml
                         formula = child.data
-                        formula = self.adjust_formula(formula, in_table_1, in_target_table, in_target_row, data_row_index)
+                        formula = self.adjust_formula(formula, data_row_index)
                         child.data = formula
                 if has_formula:
                     for child in cell_dom.childNodes:
                         if child.tagName == 'v':
                             cell_dom.removeChild(child)
-                self.adjust_xlsx_location(cell_dom, in_table_1, data_row_index)
+                self.adjust_xlsx_location(cell_dom, data_row_index)
             else:
                 for formula_attrib_name in self.formula_attrib_name_list:
                     if cell_dom.hasAttribute(formula_attrib_name):
                         formula = cell_dom.getAttribute(formula_attrib_name)
-                        formula = self.adjust_formula(formula, in_table_1, in_target_table, in_target_row, data_row_index)
+                        formula = self.adjust_formula(formula, data_row_index)
                         cell_dom.setAttribute(formula_attrib_name, formula)
                         if cell_dom.hasAttribute(self.value_attrib_name):
                             cell_dom.setAttribute(self.value_attrib_name, "")  # clear value
-            
-    def adjust_formula(self, formula, in_table_1, in_target_table, in_target_row=False, data_row_index=0):
+
+    def adjust_formula(self, formula, data_row_index=0):
         # groups:
         # 1  tablename!
         # 2  tablename
@@ -1098,30 +1523,27 @@ class FormulaAdjustmentProcessor:
         if self.enabled:
             new_formula = ""
             previous_match = 0
-            param_adjust = 0
             for match in self.formula_regex.finditer(formula):
-                if (match.group(2) is not None and match.group(2) == self.table_1_name) or (in_table_1 and match.group(1) is None):  # refers to table 1 - use option row offset
-                    param_adjust = self.app.option_row_offset
-                if (match.group(2) is not None and match.group(2) == self.target_table_name) or (in_target_table and match.group(1) is None):  # refers to target table
+                table_ref = match.group(2)
+                if self.position.refers_to_target_table(table_ref):  # refers to target table
                     row_ref = int(match.group(4))
-                    new_row_ref = row_ref + param_adjust
-                    if new_row_ref == self.app.target_row and in_target_row:  # refers to target row and we are in target template (we are inserting data)
-                        new_row_ref += data_row_index
-                    elif new_row_ref > self.app.target_row:  # target points to self or after
-                        new_row_ref += self.num_insert_rows - 1
+                    new_row_ref = self.position.output_row_num(row_ref, data_row_index, table_ref)
                     if match.group(5):  # there is a range reference
                         range_end_ref = int(match.group(9))
-                        new_range_end_ref = range_end_ref + param_adjust
-                        if range_end_ref >= self.app.target_row:
-                            add_insert_rows = self.num_insert_rows - 1  # target row already included, so subtract 1
-                        else:
-                            add_insert_rows = 0
+                        new_range_end_ref = self.position.output_row_num(range_end_ref, table_name=table_ref)
                         if match.group(6):
-                            new_range_end_ref = ''.join([':', match.group(6), match.group(8), str(new_range_end_ref + add_insert_rows)])
+                            new_range_end_ref = ''.join([':', match.group(6), match.group(8), str(new_range_end_ref)])
                         else:
-                            new_range_end_ref = ''.join([':', match.group(8), str(new_range_end_ref + add_insert_rows)])
-                    elif not in_target_row and new_row_ref == self.app.target_row and self.num_insert_rows > 0:  # expand reference into a range (was a single row ref, add range end ref)
-                        new_range_end_ref = ''.join([":", match.group(3), str(row_ref + self.num_insert_rows - 1)])
+                            new_range_end_ref = ''.join([':', match.group(8), str(new_range_end_ref)])
+                    elif (not self.position.in_insert_row()
+                          and self.position.refers_to_insert_row(new_row_ref - self.num_insert_rows + 1, table_ref)):
+                        new_row_ref = self.position.output_row_num(row_ref, 0, table_ref)  # expand reference into a range (was a single row ref, add range end ref)
+                        new_range_end_ref = ''.join([":", match.group(3),
+                                                     str(row_ref + self.num_insert_rows - 1)])
+                    elif (not self.position.in_insert_row()
+                          and self.position.refers_to_insert_row(new_row_ref, table_ref)):
+                        new_range_end_ref = ''.join([":", match.group(3),
+                                                     str(row_ref + self.num_insert_rows - 1)])
                     else:
                         new_range_end_ref = ""
                     if match.group(1):
@@ -1129,8 +1551,8 @@ class FormulaAdjustmentProcessor:
                     else:
                         table_ref = ""
                     if self.app.doctype == 'odt':
-                        new_formula = ''.join([  
-                            new_formula, 
+                        new_formula = ''.join([
+                            new_formula,
                             formula[previous_match:match.start()],
                             table_ref,
                             '<',
@@ -1139,8 +1561,8 @@ class FormulaAdjustmentProcessor:
                             '>',
                             new_range_end_ref ])
                     else:
-                        new_formula = ''.join([  
-                            new_formula, 
+                        new_formula = ''.join([
+                            new_formula,
                             formula[previous_match:match.start()],
                             table_ref,
                             match.group(3),
@@ -1150,13 +1572,13 @@ class FormulaAdjustmentProcessor:
                 else:
                     new_formula = ''.join([ new_formula, formula[previous_match:match.end()] ])
                     previous_match = match.end()
-            new_formula = ''.join([  
-                new_formula, 
+            new_formula = ''.join([
+                new_formula,
                 formula[previous_match:] ])
             return new_formula
         else:
             return formula
-    
+
     def adjust_chart(self, chart):
         '''Alter a chart so that cell references to the inserted data are correct.'''
         if self.enabled:
@@ -1166,54 +1588,52 @@ class FormulaAdjustmentProcessor:
             for chart_element in chart_elements:
                 if chart_element.hasAttribute('table:cell-range-address'):
                     cell_address = chart_element.getAttribute('table:cell-range-address')
-                    cell_address = self.adjust_formula(cell_address, False, False)  # charts are in a special object that cannot be either table 1 or target table
+                    cell_address = self.adjust_formula(cell_address)  # charts are in a special object that cannot be either table 1 or target table
                     chart_element.setAttribute('table:cell-range-address', cell_address)
                 if chart_element.hasAttribute('chart:values-cell-range-address'):
                     cell_address = chart_element.getAttribute('chart:values-cell-range-address')
-                    cell_address = self.adjust_formula(cell_address, False, False)
+                    cell_address = self.adjust_formula(cell_address)
                     chart_element.setAttribute('chart:values-cell-range-address', cell_address)
                 if chart_element.hasAttribute('chart:label-cell-address'):
                     cell_address = chart_element.getAttribute('chart:label-cell-address')
-                    cell_address = self.adjust_formula(cell_address, False, False)
+                    cell_address = self.adjust_formula(cell_address)
                     chart_element.setAttribute('chart:label-cell-address', cell_address)
             chart_elements = chart.getElementsByTagName('svg:desc')
             for chart_element in chart_elements:
                 cell_address = chart_element.firstChild.data
-                cell_address = self.adjust_formula(cell_address, False, False)
+                cell_address = self.adjust_formula(cell_address)
                 chart_element.firstChild.data = cell_address
             chart_elements = chart.getElementsByTagName('c:f')
             for chart_element in chart_elements:
                 cell_address = chart_element.firstChild.data
-                cell_address = self.adjust_formula(cell_address, False, False)
+                cell_address = self.adjust_formula(cell_address)
                 chart_element.firstChild.data = cell_address
-                
-    def adjust_xlsx_location(self, cell_dom, in_table_1, data_row_index=0):
+
+    def adjust_xlsx_location(self, cell_dom, data_row_index=0):
         if cell_dom.hasAttribute('r'):
-            if in_table_1:  # refers to table 1 - use option row offset
-                param_adjust = self.app.option_row_offset
-            else:
-                param_adjust = 0
-            if (param_adjust + data_row_index) != 0:
-                match = self.xlsx_location_regex.search(cell_dom.getAttribute('r'))
-                col_letter = match.group(1)
-                original_row_number = int(match.group(2))
-                cell_dom.setAttribute('r', col_letter + str(original_row_number + param_adjust + data_row_index))
-                
-    # end class FormulaAdjustmentProcessor
+            match = self.xlsx_location_regex.search(cell_dom.getAttribute('r'))
+            col_letter = match.group(1)
+            self.position.set_in_row_num(match.group(2))
+            cell_dom.setAttribute('r', col_letter + str(self.position.output_row_num(data_row_index=data_row_index)))
+
+    # end class FormulaAdjustmefntProcessor
+
 
 
 class SequentialChunkFeeder:
 
     chunk_size = 4096   # the size of each chunk
-    
+
     def feed(self, in_file, chunk_processor):
         '''read from an in_file and send arbitrary size chunks to a processor function
            Input: in_file - a file object
-             chunk_processor - a function that accepts a chunk and optional end_of_file flag, 
+             chunk_processor - a function that accepts a chunk and optional end_of_file flag,
                 it returns a tuple of overlap string and keep_going flag.
         '''
         in_file.seek(0)
         overlap = ""
+        keep_going = False
+        last_char = None
         # get a chunk
         if sys.version_info[0] == 2:
             new_chunk = str(in_file.read(self.chunk_size))
@@ -1227,109 +1647,100 @@ class SequentialChunkFeeder:
                 if sys.version_info[0] == 2:
                     new_chunk = str(in_file.read(self.chunk_size))
                 else:
-                    new_chunk = in_file.read(self.chunk_size).decode('UTF-8')
+                    new_chunk = in_file.read(self.chunk_size)
+                    if last_char is not None:
+                        new_chunk = last_char + new_chunk
+                        last_char = None
+                    try:
+                        new_chunk = new_chunk.decode('UTF-8')
+                    except UnicodeDecodeError:  # chunk can end in middle of unicode char, fix that
+                        last_char = new_chunk[-1:]
+                        new_chunk = new_chunk[:-1]
+                        new_chunk = new_chunk.decode('UTF-8')
             else:
                 new_chunk = None
         # process the remaining string
         if keep_going and overlap:
             chunk_processor(overlap, end_of_file=True)
-        
+
     # end class SequentialChunkFeeder
-    
+
 
 class DocumentProcessor:
 
-    app = None          # an app controller object
-    model = None        # an object with search patterns for the type of in_file being scanned
+    app = None           # an app controller object
+    model = None         # an object with search patterns for the type of in_file being scanned
     file_chunk_feeder = None # an object that breaks a file into chunks and feeds to a processing function
-    csv_data = None     # an iterator object returning rows of csv data
+    csv_data = None      # an iterator object returning rows of csv data
     csv_merge_processor = None # an object that can merge csv data into an xml template
-    string_file = None  # an object that handles the string file for xlsx
-    in_file_name = ""   # the name of the file being scanned
+    string_file = None   # an object that handles the string file for xlsx
     special_strings = None # an object that can replace special string
-    out_file = None     # a file object
-    max_buffer = 20e6   # the maximum memory size used before the buffer is written to disk
-    overlap_length = 64 # position within chunk to start overlap
-    tag_regex = None    # a regular expression object
+    out_file = None      # a file object
+    max_buffer = 20e6    # the maximum memory size used before the buffer is written to disk
+    overlap_length = 64  # position within chunk to start overlap
+    tag_regex = None     # a regular expression object
     namespace_start = "" # the namespace start tag string
-    namespace_end = ""  # the namespace end tag string
-    in_target_file = False # true when scanning target file
-    target_table_num = None    # the table number we want to process
+    namespace_end = ""   # the namespace end tag string
+    target_table_num = None # the table number we want to process
     target_table_name = None # the table tab name
     table_name_attrib_name = None # the name of the xml attribute containing table name
-    table_index = {}    # a dictionary with table indexes and names for xlsx
-    table_name = None   # a string table id attribute in html tables
-    table_num = 0       # the number of tables found
-    in_table_1 = False  # true when in first table
-    seen_row_1 = False  # true after row 1 has been processed
-    table_depth = 0     # count possible recursive tables
-    row_depth = 0       # the levels of start/end tags was are in
-    row_num = 0         # the row count within a table
-    in_row = False      # set to true when inside a row
-    row_string = ""     # accumulated row string used when a row crosses chunk boundary
-    data_row_index = 0  # the csv data row number
-    outgoing_data_row_index = 0 # the actual output data row index
-    flush = False       # true when processing is complete and remainder of doc can be written out
-    num_insert_rows = 0 # number of rows to be inserted from csv file
+    table_index = {}     # a dictionary with table indexes and names for xlsx
+    table_name = None    # a string table id attribute in html tables
+    table_num = 0        # the number of tables found
+    table_depth = 0      # count possible recursive tables
+    row_depth = 0        # the levels of start/end tags was are in
+    row_num = 0          # the row count within a table
+    in_row = False       # set to true when inside a row
+    row_string = ""      # accumulated row string used when a row crosses chunk boundary
+    append_template = "" # row_string to use as template when in append mode
+    flush = False        # true when processing is complete and remainder of doc can be written out
     cell_address_regex = None # regex object to septerate address components
     ods_table_name_regex = None # regex object to find table names in ods
     xlsx_special_regex = None # regex object to find xlsx autofilter and cell merge refs
-    NAMESPACE = 1       # match group: document namespace tag
+    NAMESPACE = 1        # match group: document namespace tag
     NAMESPACE_TAGNAME = 2 # match group: document namespace tagname
-    TABLESTART = 3      # match group: table start
-    ROWSTART = 4        # match group: row start
-    ROWEND = 5          # match group: row end
-    TABLEEND = 6        # match group: table end
-    
-    def __init__(self, app, model, csv_merge_processor, special_strings):
+    TABLESTART = 3       # match group: table start
+    ROWSTART = 4         # match group: row start
+    ROWEND = 5           # match group: row end
+    TABLEEND = 6         # match group: table end
+
+    def __init__(self, app, model, position, csv_merge_processor, special_strings):
         self.app = app
         self.model = model
+        self.position = position
         self.file_chunk_feeder = SequentialChunkFeeder()
         self.csv_merge_processor = csv_merge_processor
         self.special_strings = special_strings
         self.textnode_tagname = self.model.textnode_tagname()
         self.table_name_attrib_name = self.model.table_name_attrib_name()
+        self.max_buffer = self.app.max_buffer
         self.cell_address_regex = re.compile("([A-Z]+)([0-9]+)")
         #                                      letter  number
         self.ods_table_name_regex = re.compile('<table:table [^>]*table:name=[\'\"]([a-zA-Z0-9_.-]+)[\'\"][^>]*>')
         #                                       table begin tag   name attribute     name
-        self.xlsx_special_regex = re.compile('<(autoFilter|mergeCell) [^>]*ref="([^"]+)"[^>]*>')
-        #                                   <   autoFilter|mergeCell       ref="       "     >
+        xlsx_special_regex_sunstrings = ['<(autoFilter|mergeCell) [^>]*',  # <   group 1 autoFilter|mergeCell
+            'ref="([^"]+)"[^>]*>',  # ref= group 2 "  ">
+            '|<definedName (^name)*',  # <definedName group 3
+            'name="_xlnm._FilterDatabase"[^>]*>([^<]+)</definedName>']  # name="_xlnm._FilterDatabase"  group 4 formula  </definedName>
+        self.xlsx_special_regex = re.compile(r''.join(xlsx_special_regex_sunstrings))
 
     def set_string_file(self, string_file):
         self.string_file = string_file
-        
-    def scan(self, in_file, in_target_file, filename):
+
+    def scan(self, in_file, filename):
         '''reset so that a new set of chunk process actions can begin.'''
-        self.in_target_file = in_target_file
-        self.in_file_name = filename
+        self.position.new_file(filename)
         self.target_table_num = self.app.table
         self.namespace_start = ""
         self.namespace_end = ""
-        self.table_name = None
-        self.table_num = 0
-        self.table_depth = 0
-        self.row_depth = 0
-        self.row_num = 0
-        self.in_row = False
         self.row_string = ""
-        self.data_row_index = 0
-        self.outgoing_data_row_index = 0
         self.flush = False
-        if isinstance(self.app.table, str):
-            self.target_table_name = self.app.table
-        else:
-            self.target_table_num = self.app.table
-        if self.app.doctype == 'ods' and self.target_table_name is None:  # scan just for target table name
-            in_file.seek(0)
-            self.file_chunk_feeder.feed(in_file, self.scan_table_names)  # this will set self.target_table_name
-            self.csv_merge_processor.formula_adjuster.set_target_table_name(self.target_table_name)
-            self.table_num = 0
-        elif self.app.doctype == 'xlsx' and self.target_table_name is None and self.target_table_num in self.table_index:
-            self.target_table_name = self.table_index[self.target_table_num]
-            self.csv_merge_processor.formula_adjuster.set_target_table_name(self.target_table_name)
-        if self.app.doctype == 'html' and self.target_table_name:
-            regex_string = re.sub(r'id=', ''.join(['id=[\'\"]',self.target_table_name,'[\'\"]']), self.model.tag_regex())
+        if self.app.doctype == 'ods' and self.position.target_table_name is None:  # scan just for target table name
+            self.file_chunk_feeder.feed(in_file, self.scan_table_names)  # this will set self.position.target_table_name
+            self.position.reset()
+        if self.app.doctype == 'html' and self.position.target_table_name:
+            regex_string = re.sub(r'id=', ''.join(['id=[\'\"]',self.position.target_table_name,'[\'\"]']),
+                                  self.model.tag_regex())
         else:
             regex_string = self.model.tag_regex()
         self.tag_regex = re.compile(regex_string)  # target pattern needs to be a regex-OR pattern that will match either start or end tags
@@ -1337,7 +1748,7 @@ class DocumentProcessor:
         self.file_chunk_feeder.feed(in_file, self.chunk_process)
         self.out_file.seek(0)
         return self.out_file
-        
+
     def chunk_process(self, chunk, end_of_file=False):
         '''scan a chunk and identify rows. self.row_string is used to carry partial rows to the next run'''
         if self.app.doctype != 'xlsx':
@@ -1353,12 +1764,9 @@ class DocumentProcessor:
         for tag in self.tag_regex.finditer(chunk):
             # count the table and row matches
             if tag.group(self.ROWSTART):
-                self.row_depth += 1
-                if self.row_depth == 1:
+                self.position.next_row()
+                if self.position.in_row_depth_1():
                     row_start = tag.start(self.ROWSTART)
-                    if self.table_depth == 1:
-                        self.row_num += 1
-                self.in_row = True
                 max_match = tag.end(self.ROWSTART)
                 if row_start > process_point:
                     self.write_output(chunk[process_point:row_start])
@@ -1366,93 +1774,74 @@ class DocumentProcessor:
             elif tag.group(self.ROWEND):
                 row_end = tag.end(self.ROWEND)
                 max_match = row_end
-                if self.row_depth == 1:
+                if self.position.in_row_depth_1():
                     self.row_string = ''.join([self.row_string, chunk[row_start:row_end]])
                     process_point = row_end
-                    self.row_num = self.row_process(self.row_string, self.row_num)  # write to output, replicate row with merged data if target, row_num will be increased by no. or rows added
-                    self.in_row = False
-                    self.row_depth = 0
+                    self.row_num = self.row_process(self.row_string)  # write to output, replicate row with merged data if target, row_num will be increased by no. or rows added
+                    if self.app.append:  # save the row_string in case it is needed for append
+                        self.append_template = self.row_string
                     self.row_string = ""
-                elif self.row_depth > 1: 
-                    self.row_depth -= 1
-                else:  # for some tags, the rowend and tableend tags are the same, this handles that condition.
-                    if self.table_depth >= 1:
-                        self.table_depth -= 1
-            elif tag.group(self.TABLESTART):  
-                self.table_depth += 1
+                self.position.end_row()
+            elif tag.group(self.TABLESTART):
+                self.position.next_table()
                 max_match = tag.end(self.TABLESTART)
-                if self.table_depth == 1: 
-                    self.table_num +=1
-                    self.row_num = 0
+                if self.position.table_depth_1():
                     if self.table_name_attrib_name:
-                        id_match = re.search(self.table_name_attrib_name+"=[\'\"]([a-zA-Z_.-]+)[\'\"]", tag.group())
+                        id_match = re.search(self.table_name_attrib_name+"=[\'\"]([a-zA-Z_.-]+)[\'\"]",
+                                             tag.group())
                         if id_match:
-                            self.table_name = id_match.group(1)
-                            if self.target_table_name is None and self.table_num == self.target_table_num:
-                                self.target_table_name = self.table_name
-                                self.csv_merge_processor.formula_adjuster.target_table_name = self.table_name
-                        else:
-                            self.table_name = None
-                    elif self.app.doctype == 'xlsx':
-                        self.table_name = self.table_index[self.table_num]
-                    # check if this is table 1
-                    self.in_table_1 = self.table_num == 1 and (self.in_file_name in ('content.xml', 'xl/worksheets/sheet1.xml', 'word/document.xml') or self.app.doctype == 'html') 
-                    if self.in_table_1 and self.table_name:
-                        self.csv_merge_processor.formula_adjuster.table_1_name = self.table_name
-                    # check if this is target table
+                            self.position.set_table_name(id_match.group(1))
+                            if self.position.target_table_name is None and self.position.in_target_table():
+                                self.position.set_target_table_name(id_match.group(1))
                     if self.app.doctype == 'xlsx':
-                        self.in_target_table = self.in_target_file
-                        if self.in_target_table and tag.group() == '<sheetData/>':  # The table is empty, generate an empty row for inserting data
+                        if self.position.in_target_table() and tag.group() == '<sheetData/>':  # The table is empty, generate an empty row for inserting data
                             self.write_output(''.join([chunk[process_point:tag.start(self.TABLESTART)],
                                                        '<sheetData>']))
-                            sheet_dom = xml.dom.minidom.Document()
-                            row_dom = sheet_dom.createElement("row")
-                            sheet_dom.appendChild(row_dom)
-                            row_dom.setAttributeNode(sheet_dom.createAttribute('r'))
-                            row_dom.setAttribute('r', '2')
-                            cell_dom = sheet_dom.createElement("c")
-                            row_dom.appendChild(cell_dom)
-                            cell_dom.setAttributeNode(sheet_dom.createAttribute('r'))
-                            cell_dom.setAttribute('r', 'A2')
-                            self.row_string = row_dom.toxml()
-                            self.row_num = 2
-                            self.row_num = self.row_process(self.row_string, self.row_num)  # write to output, replicate row with merged data if target, row_num will be increased by no. or rows added
+                            if self.app.header_from_csv:
+                                self.row_string = self.generate_row_xlsx()
+                                self.row_process(self.row_string)  # write to output, replicate row
+                            else:
+                                self.position.set_in_row_num(self.app.target_row - 1)
+                            self.row_string = self.generate_row_xlsx()
+                            self.row_process(self.row_string)  # write to output, replicate row with merged data if target, row_num will be increased by no. or rows added
                             self.write_output('</sheetData>')
                             process_point = max_match
                             self.in_row = False
                             self.row_depth = 0
                             self.row_string = ""
-                    else:
-                        self.in_target_table = self.in_target_file and (
-                            (self.target_table_num is not None and self.table_num == self.target_table_num) 
-                            or (self.target_table_name is not None and self.table_name == self.target_table_name))
             elif tag.group(self.TABLEEND):
-                if self.table_num == self.target_table_num and self.row_num < self.app.target_row:  # the target table had fewer than target rows, process a blank row
-                    self.row_num += 1
-                    while self.row_num <= self.app.target_row:
-                        self.row_process(self.model.row_prototype(), self.row_num)
-                        self.row_num += 1
-                self.table_depth -= 1
+                if self.position.in_target_table():
+                    if self.app.append:  # append data to the end of the table
+                        self.position.set_in_template_row()
+                        self.position.next_row()
+                        self.row_process(self.append_template)  # write to output, replicate row with merged data, row_num will be increased by no. or rows added
+                    elif self.position.is_before_template_row():  # the target table had fewer than target rows, process a blank row
+                        self.position.next_row()
+                        while self.position.is_at_or_before_template_row():
+                            self.row_process(self.model.row_prototype())
+                            self.position.generate_row()
+                self.position.end_table()
                 max_match = tag.end(self.TABLEEND)
-                if self.table_depth == 0:
-                    self.row_depth = 0
-                    self.row_num = 0
-                if self.table_num == self.target_table_num and (
-                    not self.row_string and self.app.doctype in ['odt', 'html-table', 'html-div', 'docx']):
+                if (self.app.doctype in ['odt', 'html-table', 'html-div', 'docx']
+                    and self.position.after_insert_row()):
                     self.flush = True  # the doc types do not need any more row processing
             elif tag.group(self.NAMESPACE):  # the namespace is added to template row before parsing.
                 self.namespace_start = tag.group(self.NAMESPACE)
                 self.namespace_end = ''.join(["</", tag.group(self.NAMESPACE_TAGNAME), ">"])
         if self.app.doctype == 'xlsx':  # scan for cell merge tags
             for match in self.xlsx_special_regex.finditer(chunk):
-                adjusted_ref = self.csv_merge_processor.formula_adjuster.adjust_formula(match.group(2), self.in_table_1, self.in_target_table)
+                if match.group(2) is not None:
+                    found = 2
+                else:
+                    found = 4
+                adjusted_ref = self.csv_merge_processor.formula_adjuster.adjust_formula(match.group(found))
                 tag = match.group()
-                adjusted_tag = tag.replace(match.group(2), adjusted_ref)
+                adjusted_tag = tag.replace(match.group(found), adjusted_ref)
                 chunk = chunk.replace(tag, adjusted_tag)
         if end_of_file or self.flush:
             self.write_output(chunk[process_point:])
             process_point = len(chunk)
-        elif self.in_row:
+        elif self.position.in_row():
             if row_start <= overlap_point:
                 self.row_string = ''.join([self.row_string, chunk[row_start:overlap_point]])
                 process_point = overlap_point
@@ -1467,112 +1856,125 @@ class DocumentProcessor:
                 process_point = overlap_point
         return (chunk[process_point:], True)
 
-    def row_process(self, row, sheet_row_num):
+    def generate_row_xlsx(self):
+        '''Create the code for an empty row for xlsx.  It only needs one cell, additional ones will be added when needed.'''
+        self.position.generate_row()
+        row_num = self.position.in_row_num
+        sheet_dom = xml.dom.minidom.Document()
+        row_dom = sheet_dom.createElement("row")
+        sheet_dom.appendChild(row_dom)
+        row_dom.setAttributeNode(sheet_dom.createAttribute('r'))
+        row_dom.setAttribute('r', str(row_num))
+        cell_dom = sheet_dom.createElement("c")
+        row_dom.appendChild(cell_dom)
+        cell_dom.setAttributeNode(sheet_dom.createAttribute('r'))
+        cell_dom.setAttribute('r', 'A'+str(row_num))
+        return row_dom.toxml()
+
+    def row_process(self, row):
         '''process a row in different ways depending on row number; send of self.out_file; replicate target row and inject data'''
-        if self.in_table_1 and not self.seen_row_1:  # row 1 - check for options in first cell
-            row_dom = xml.dom.minidom.parseString(''.join([self.namespace_start, row, self.namespace_end]))
-            for cell_tagname in self.model.cell_tagname():
-                cell_list = row_dom.getElementsByTagName(cell_tagname)
-                if cell_list:
-                    cell = cell_list[0]
-            if self.textnode_tagname:
-                textnode_list = cell.getElementsByTagName(self.textnode_tagname)
-                if textnode_list:
-                    cell_data = textnode_list[0].firstChild.data
-                else:
-                    cell_data = ""
-            else:
-                cell_data = cell.firstChild.data
-            if self.app.doctype == 'xlsx':
-                if cell_data and cell.hasAttribute('t') and cell.getAttribute('t') == 's':
-                    try:
-                        index = int(cell_data)
-                        cell_data = self.string_file.cell1(index)
-                    except ValueError:
-                        pass
-                else:  # there is no data in cell1
-                    self.string_file.cell1(None)  # do the search for cell1 anyway to correctly initialize string_file
-            if cell_data[:8].lower() == 'csv2odf:':
-                self.app.add_args(cell_data[8:])
-                self.app.test_args()  # args in file, verify all args are sufficient
-                self.target_table_num = self.app.table  # options may have changed, so reload them
-                row = ""  # do not output the row when it has options
-                self.app.option_row_offset -= 1
-                sheet_row_num = 0
-            else:
-                self.app.test_args()  # no args in file, verify command line args are sufficient
-            if self.app.nodata:
-                self.csv_data = None
-                self.num_insert_rows = 0
-            else:
-                self.csv_data = IncomingDataSource(self.app)
-                if self.app.end and self.csv_data.num_rows > self.app.end:
-                    self.num_insert_rows = self.csv_data.num_rows - self.app.start - (self.csv_data.num_rows - self.app.end) + 1
-                else:
-                    self.num_insert_rows = self.csv_data.num_rows - self.app.start + 1
-            self.csv_merge_processor.set_num_insert_rows(self.num_insert_rows)
-            self.seen_row_1 = True
-        if self.in_target_table:  # target table
-            if sheet_row_num == self.app.target_row - 1:  # the head row
-                row_dom = xml.dom.minidom.parseString(''.join([self.namespace_start, row, self.namespace_end]))
-                if self.app.header_from_csv:
-                    head_row = self.csv_data.next()
-                    if head_row:  # merge header row from csv
-                        self.csv_merge_processor.set_template(row_dom)
-                        row_dom = self.csv_merge_processor.merge_row(head_row, sheet_row_num, self.data_row_index, self.in_table_1, self.in_target_table)
-                        row = row_dom.toxml()
-                        self.data_row_index += 1
-                    else:
-                        self.csv_merge_processor.adjust_row(row_dom, self.in_table_1, self.in_target_table)
-                        row = row_dom.firstChild.firstChild.toxml()
-                else:
-                    self.csv_merge_processor.adjust_row(row_dom, self.in_table_1, self.in_target_table)
-                    if row_dom.hasChildNodes():
-                        if row_dom.firstChild.hasChildNodes():
-                            row = row_dom.firstChild.firstChild.toxml()
-                        else:
-                            row = row_dom.firstChild.toxml()
-                    else:
-                        row = row_dom.toxml()
-                self.write_output(row)
-            elif sheet_row_num == self.app.target_row and self.csv_data:  # target row - use this as a template and inject each data row, replicating the template
-                row_dom = xml.dom.minidom.parseString(''.join([self.namespace_start, row, self.namespace_end]))
-                if self.csv_data.num_rows > 0:
-                    self.csv_merge_processor.set_template(row_dom)
-                    for data_row in self.csv_data:
-                        if self.data_row_index + 1 >= self.app.start and (self.app.end is None or self.data_row_index <= self.app.end):
-                            row_dom = self.csv_merge_processor.merge_row(data_row, sheet_row_num, self.outgoing_data_row_index, self.in_table_1, self.in_target_table, True)
-                            if app.verbose and self.data_row_index % 5 == 4:
-                                sys.stderr.write("csv2odf: processing row " + str(self.data_row_index + 1) + "\r")
-                            row = row_dom.toxml()
-                            self.write_output(row)
-                            self.outgoing_data_row_index += 1
-                            sheet_row_num += 1
-                        self.data_row_index += 1
-                        if self.app.end and self.data_row_index >= self.app.end:
-                            break
-                    sheet_row_num -= 1  # subtract 1 because the 1st row merged already existed
-                    self.outgoing_data_row_index -= 1
-                else:
-                    row_dom = self.csv_merge_processor.null_row(sheet_row_num, self.data_row_index)
-                    self.csv_merge_processor.adjust_row(row_dom, self.in_table_1, self.in_target_table, True)
-                    row = row_dom.toxml()
-                    self.write_output(row)
-                if app.verbose:
-                    sys.stderr.write("csv2odf: processed " + str(self.data_row_index - self.app.start + 1) + " rows\r\n")
+        if self.position.in_row_num_1():  # row 1 may contain options
+            row = self.row_1_process(row)
+            # options are now finalized, setup csv_data
+            self.csv_data = IncomingDataSource(self.app)  # setup incoming data source after all options are loaded
+            self.csv_merge_processor.set_num_insert_rows(self.csv_data.num_rows)
+            self.position.set_num_insert_rows(self.csv_data.num_rows)
+        if self.position.in_target_table():  # target table
+            if self.position.in_header_row():
+                self.header_row_process(row)
+            elif self.position.in_insert_row() and self.csv_data:
+                self.template_row_process(row)
             elif row:  # not target row, but in target table
                 row_dom = xml.dom.minidom.parseString(''.join([self.namespace_start, row, self.namespace_end]))
-                self.csv_merge_processor.adjust_row(row_dom, self.in_table_1, self.in_target_table, False, self.outgoing_data_row_index)
+                self.csv_merge_processor.adjust_row(row_dom)
                 row = row_dom.firstChild.firstChild.toxml()
                 self.write_output(row)
         elif row:  # not target table
             if self.app.doctype in ['ods', 'xlsx']:
                 row_dom = xml.dom.minidom.parseString(''.join([self.namespace_start, row, self.namespace_end]))
-                self.csv_merge_processor.adjust_row(row_dom, self.in_table_1, self.in_target_table)
+                self.csv_merge_processor.adjust_row(row_dom)
                 row = row_dom.firstChild.firstChild.toxml()
             self.write_output(row)
-        return sheet_row_num
-    
+
+    def row_1_process(self, row):
+        # row 1 - check for options in first cell
+        row_dom = xml.dom.minidom.parseString(''.join([self.namespace_start, row, self.namespace_end]))
+        for cell_tagname in self.model.cell_tagname():
+            cell_list = row_dom.getElementsByTagName(cell_tagname)
+            if cell_list:
+                cell = cell_list[0]
+        if self.textnode_tagname:
+            textnode_list = cell.getElementsByTagName(self.textnode_tagname)
+            if textnode_list:
+                cell_data = textnode_list[0].firstChild.data
+            else:
+                cell_data = ""
+        else:
+            cell_data = cell.firstChild.data
+        if self.app.doctype == 'xlsx':
+            if cell_data and cell.hasAttribute('t') and cell.getAttribute('t') == 's':
+                try:
+                    index = int(cell_data)
+                    cell_data = self.string_file.cell1(index)
+                except ValueError:
+                    pass
+            else:  # there is no data in cell1
+                self.string_file.cell1(None)  # do the search for cell1 anyway to correctly initialize string_file
+        if cell_data[:8].lower() == 'csv2odf:':
+            self.app.add_args(cell_data[8:])
+            self.app.test_args()  # args in file, verify all args are sufficient
+            self.position.set_params()  # options may have changed, so reload them
+            row = ""  # do not output the row when it has options
+            self.position.subtract_option_row()
+        else:
+            self.app.test_args()  # no args in file, verify command line args are sufficient
+        return row
+
+    def header_row_process(self, row):
+        row_dom = xml.dom.minidom.parseString(''.join([self.namespace_start, row, self.namespace_end]))
+        if self.app.header_from_csv:
+            if sys.version_info[0] == 2:
+                head_row = self.csv_data.next()
+            else:
+                head_row = self.csv_data.__next__()
+            if head_row:  # merge header row from csv
+                self.csv_merge_processor.set_template(row_dom)
+                row_dom = self.csv_merge_processor.merge_row(head_row, self.csv_data.row_index())
+                row = row_dom.toxml()
+            else:
+                self.csv_merge_processor.adjust_row(row_dom)
+                row = row_dom.firstChild.firstChild.toxml()
+            self.csv_data.subtract()
+        else:
+            self.csv_merge_processor.adjust_row(row_dom)
+            if row_dom.hasChildNodes():
+                if row_dom.firstChild.hasChildNodes():
+                    row = row_dom.firstChild.firstChild.toxml()
+                else:
+                    row = row_dom.firstChild.toxml()
+            else:
+                row = row_dom.toxml()
+        self.write_output(row)
+
+    def template_row_process(self, row):
+        # target row - use this as a template and inject each data row, replicating the template
+        row_dom = xml.dom.minidom.parseString(''.join([self.namespace_start, row, self.namespace_end]))
+        self.csv_merge_processor.set_template(row_dom)
+        if self.csv_data.num_rows > 0:
+            for data_row in self.csv_data:
+                row_dom = self.csv_merge_processor.merge_row(data_row, self.csv_data.row_index())
+                if app.verbose and self.csv_data.row_index() % 5 == 4:
+                    sys.stderr.write("csv2odf: processing row " + str(self.csv_data.row_index() + 1) + "\r")
+                row = row_dom.toxml()
+                self.write_output(row)
+        else:
+            row_dom = self.csv_merge_processor.null_row(self.csv_data.row_index())
+            self.csv_merge_processor.adjust_row(row_dom)
+            row = row_dom.toxml()
+            self.write_output(row)
+        if app.verbose:
+            sys.stderr.write("csv2odf: processed " + str(self.csv_data.row_index() + 1) + " rows\r\n")
+
     def write_output(self, data):
         if sys.version_info[0] == 2:
             if isinstance(data, unicode):
@@ -1581,15 +1983,16 @@ class DocumentProcessor:
                 self.out_file.write(data)
         else:
             self.out_file.write(bytes(data, 'UTF-8'))
-            
+
     def scan_table_names(self, chunk, end_of_file=False):
         '''Find target table name in a ods document.  <table:table table:name="Reference"> '''
         match = None
         for match in self.ods_table_name_regex.finditer(chunk):
-            self.table_num += 1
-            if self.table_num == self.target_table_num:
-                self.target_table_name = match.group(1)
+            self.position.next_table()
+            self.position.set_table_name(match.group(1))
+            if self.position.target_table_name is not None:
                 break
+            self.position.end_table()
         if end_of_file:
             overlap = ""
         else:
@@ -1597,7 +2000,7 @@ class DocumentProcessor:
             if match and overlap_point < match.end():
                 overlap_point = match.end()
             overlap = chunk[overlap_point:]
-        return (overlap, self.target_table_name is None)
+        return (overlap, self.position.target_table_name is None)
 
     def load_sheet_index(self, index_file):
         '''for xlsx, load the index with spreadsheet names'''
@@ -1605,13 +2008,13 @@ class DocumentProcessor:
         for element in index_file_dom.getElementsByTagName('sheet'):
             if element.hasAttribute('name') and element.hasAttribute('sheetId'):
                 self.table_index[int(element.getAttribute('sheetId'))] = element.getAttribute('name')
-            
+
     # end class DocumentProcessor
 
 
 class SharedStringFile:
     '''For xlsx files, read existing file and append strings, return extended file'''
-    
+
     in_file = None           # a file object
     out_file = None          # a file object
     special_strings = None   # an object that can replace special string
@@ -1624,41 +2027,48 @@ class SharedStringFile:
     cell1_string = ""        # the found cell1
     inserted = 0             # the number of strings added to the original list
     cell_regex = None        # regex to find cell contents
-    date_regex = None        # regex to find date tags
-    STRING_START = "<si><t>" # string start tag
-    STRING_END = "</t></si>" # string end tag
-    LIST_END = "</sst>"      # end of list tag
+    T_START = 1              # match group for t tag start
+    T_END = 2                # match group for t tag end
+    SI_END = 3               # match group for si tag start
+    GROUP_LIST_END = 4             # match group for list end
+    STRING_START = "<si><t>"
+    STRING_END = "</t></si>"
+    LIST_END = "</sst>"
     date_cell_index_list = [] # list of cell indexes tagged as dates for csv2odf
     debug = False            # turn on extra information
-    
-    def __init__(self, in_file, special_string_replacement_object, debug):
+
+    def __init__(self, in_file, special_string_replacement_object, max_buffer, debug):
         self.in_file = in_file
         self.special_strings = special_string_replacement_object
+        self.max_buffer = max_buffer
         self.intermediate_file = TemporaryFile(max_size=self.max_buffer)
         self.out_file = TemporaryFile(max_size=self.max_buffer)
-        self.cell_regex = re.compile("(<si><t>)([^<>]*)(</t></si>)|(</sst>)")
-        #                             1 start 2 string 3 end str   4 end of list
-        self.date_regex = re.compile(r"\[csv2odf-date[^\]]*\]", re.IGNORECASE)
+        self.cell_regex = re.compile("(<t.*?>)|(</t>)|(</si>)|(</sst>)")
         self.debug = debug
-        
+
     def cell1(self, cell1_index):
         '''load string file and scan for cell1 and date cells, return cell1 '''
         self.cell1_index = cell1_index
         file_chunk_feeder = SequentialChunkFeeder()
         file_chunk_feeder.feed(self.in_file, self.scan_chunk_cells)
-        self.in_file.close()
+        self.in_file.truncate()  # erase the orginal string file to save space, but keep it open
         return self.cell1_string
-    
+
     def scan_chunk_cells(self, chunk):
         '''check for date cells and cell1 data'''
+        match = None
         for match in self.cell_regex.finditer(chunk):
-            if match.group(2):
-                if self.date_regex.search(match.group(2)):  # found date tag
-                    self.date_cell_index_list.append(self.num_found_cells)  # store the index of the date cell
-                if self.num_found_cells == self.cell1_index:  # found cell1
-                    self.cell1_string = match.group(2)
+            if self.num_found_cells == self.cell1_index:  # found cell1
+                if match.group(self.T_START):
+                    cell1_start = match.end(self.T_START)
+                if match.group(self.T_END):
+                    cell1_end = match.start(self.T_END)
+                    self.cell1_string = ''.join([self.cell1_string, chunk[cell1_start:cell1_end]])
+            if match.group(self.SI_END):
                 self.num_found_cells += 1
-        if match.group(4):  # the end of string list, do not write out the end tag at this time.
+            if match.group(self.GROUP_LIST_END):
+                break
+        if match and match.group(self.GROUP_LIST_END):  # the end of string list, do not write out the end tag at this time.
             self.write_intermediate(self.special_strings.replace(chunk[:match.start()]))
             return ("", False)
         else:
@@ -1666,14 +2076,16 @@ class SharedStringFile:
             if match and match.end() > overlap_point:
                 overlap_point = match.end()
             self.write_intermediate(self.special_strings.replace(chunk[:overlap_point]))
+            if self.num_found_cells == self.cell1_index:  # cell1 continues in the next chunk
+                self.cell1_string = chunk[cell1_start:overlap_point]
             return (chunk[overlap_point:], True)
-    
+
     def is_a_date_cell(self, index_string):
         try:
             return int(index_string) in self.date_cell_index_list
         except ValueError:
             return False
-        
+
     def append(self, string):
         self.num_found_cells += 1
         self.inserted += 1
@@ -1681,7 +2093,7 @@ class SharedStringFile:
             sys.stderr.write("string "+str(self.num_found_cells-1)+": "+string+"\n")
         self.write_intermediate(''.join([self.STRING_START, cgi.escape(string), self.STRING_END]))
         return self.num_found_cells-1
-        
+
     def finish(self):
         '''end the string file and update count and unique_count attributes.'''
         self.write_intermediate(self.LIST_END)
@@ -1700,11 +2112,12 @@ class SharedStringFile:
         chunk = count_regex.sub(''.join([match.group(1), str(count + self.inserted), match.group(3)]), chunk)
         count_regex_string = '(<sst[^>]*uniqueCount=[\"\'])([0-9]+)([\"\'][^>]*>)'
         #                     (<sst  *  uniqueCount=      )(number)(     *     >)
-        #                            group 1                group 2    group 3       
+        #                            group 1                group 2    group 3
         unique_count_regex = re.compile(count_regex_string)
         match = unique_count_regex.search(chunk)
         unique_count = int(match.group(2))
-        chunk = unique_count_regex.sub(''.join([match.group(1), str(unique_count + self.inserted), match.group(3)]), chunk)
+        chunk = unique_count_regex.sub(''.join([match.group(1), str(unique_count + self.inserted),
+                                                match.group(3)]), chunk)
         #write the first chunk to out_file
         if sys.version_info[0] == 2:
             if isinstance(chunk, unicode):
@@ -1717,7 +2130,7 @@ class SharedStringFile:
         self.out_file.write(self.intermediate_file.read())
         self.intermediate_file.close()
         return self.out_file
-        
+
     def write_intermediate(self, data):
         if sys.version_info[0] == 2:
             if isinstance(data, unicode):
@@ -1742,7 +2155,7 @@ class SpecialStringSubstitutionProcessor:
     comment = ""            # a string supplied by the user to be inerted into the document
     comment_regex = None    # compiled regex for comment
     date_regex = None       # compiled regex for date
-    
+
     def __init__(self, comment=""):
         if comment:
             self.replace_comment = True
@@ -1771,14 +2184,14 @@ class SpecialStringSubstitutionProcessor:
                         # the string cannot be interpreted, assume it should be part of the date format and not an offset
                         offset = datetime.timedelta(0)
                     display_date = datetime.datetime.today()+offset
-                else:  
+                else:
                     display_date = datetime.datetime.today()
                 if not date_spec:
                     date_spec = "%Y-%m-%d"
                 date_string = display_date.strftime(date_spec)
                 string = string.replace(match.group(), date_string) # replace '[csv2odf-comment]' with self.app.comment
         return string
-    
+
     # end class SpecialStringSubstitutionProcessor
 
 
@@ -1792,10 +2205,11 @@ class TemporaryFile:
     disk_file = None
     is_open = False
     mode = 'w+b'
+    delete = True
     is_in_ram = True
     size_limit = 20E6
     chunk_size = 0x10000
-    
+
     def __init__(self, max_size=None, mode='w+b'):
         self.mode = mode
         if max_size:
@@ -1804,7 +2218,7 @@ class TemporaryFile:
             self.ram_file = io.StringIO()
         else:
             self.ram_file = io.BytesIO()
-        
+
     def read(self, number_of_bytes=None):
         if self.is_in_ram:
             return self.ram_file.read(number_of_bytes)
@@ -1813,13 +2227,13 @@ class TemporaryFile:
                 return self.disk_file.read(number_of_bytes)
             else:
                 return self.disk_file.read()
-    
+
     def __iter__(self):
         return self
 
     def next(self):  # used by python 2.x
         return self.__next__()
-          
+
     def __next__(self):
         if self.is_in_ram:
             if self.mode == 'w':
@@ -1832,7 +2246,7 @@ class TemporaryFile:
                 return self.ram_file.__next__()
         else:
             return self.disk_file.__next__()
-          
+
     def write(self, data):
         if self.is_in_ram:
             self.ram_file.write(data)
@@ -1840,60 +2254,76 @@ class TemporaryFile:
                 self.rollover()
         else:
             self.disk_file.write(data)
-    
+
     def seek(self, position, start_point=0):
         if self.is_in_ram:
             return self.ram_file.seek(position, start_point)
         else:
             return self.disk_file.seek(position, start_point)
-    
+
     def is_in_ram(self):
         return self.is_in_ram
-    
+
     def tell(self):
         if self.is_in_ram:
             return self.ram_file.tell()
         else:
             return self.disk_file.tell()
-          
+
     def flush(self):
         if self.is_in_ram:
-            return self.ram_file.flush()
+            self.ram_file.flush()
         else:
-            return self.disk_file.flush()
-          
+            self.disk_file.flush()
+
+    def truncate(self):
+        if self.is_in_ram:
+            self.ram_file.truncate()
+        else:
+            self.disk_file.truncate()
+
     def rollover(self):
-        self.disk_file = tempfile.NamedTemporaryFile()
+        self.disk_file = tempfile.NamedTemporaryFile(mode=self.mode, delete=False)
         self.name = self.disk_file.name
         self.ram_file.seek(0)
         self.disk_file.write(self.ram_file.read())
         self.is_in_ram = False
         self.ram_file.close()
-    
+
     def write_to_zipfile(self, inner_filename, zipfile):
         if self.is_in_ram:
             zipfile.writestr(inner_filename, self.ram_file.read())
         else:
             zipfile.write(self.name, inner_filename)
-    
+
     def type(self):
         if self.is_in_ram:
             return type(self.ram_file)
         else:
             return type(self.disk_file)
-    
+
     def close(self):
         if self.is_in_ram:
             self.ram_file.close()
         else:
             self.disk_file.close()
+            os.remove(self.name)
+
+    def release(self):
+        '''close the file but leave it on disk so it is usable by other processes'''
+        if self.is_in_ram:
+            self.rollover()
+        self.disk_file.close()
+
+    def remove(self):
+        os.remove(self.name)
 
     # end class TemporaryFile
 
 
 class DocumentArchive:
     '''Allows opening a zip archive, filenames matching a regex pattern are loaded from the archive into temporary files, new temporary files with altered content can replace old ones when the archive is rewritten to a new filename.'''
-    
+
     #properties
     app = None
     type = 'zip'
@@ -1903,22 +2333,23 @@ class DocumentArchive:
     target_filename_pattern = None
     target_filename = None
     fileobject_list = dict()  # dictionary of file objects with file names as keys
-    max_buffer = 20e6
-    
+    max_buffer = 20E6
+
     def __init__(self, app, model):
         self.app = app
         if self.app.doctype == 'xlsx':
             self.target_filename_pattern = model.target_filename_regex().replace("[0-9]", str(app.table))
         else:
             self.target_filename_pattern = model.target_filename_regex()
-        
+        self.max_buffer = self.app.max_buffer
+
     def open(self, in_package_name):
         '''open in file and out file.  If in file is stdin, load it into a temporary file.
             If any error, return a message, otherwise return null'''
         self.in_package_name = in_package_name
         if self.in_package_name == "stdin":
             if sys.stdin.isatty():
-                self.app.stop("Error: there was no template file specified.")
+                self.app.stop("Error: there was no template file specified.", 1)
             else:
                 t = TemporaryFile(max_size=self.max_buffer)
                 if sys.version_info[0] == 2:
@@ -1935,7 +2366,7 @@ class DocumentArchive:
                     self.inner_filenames = ["stdin"]
                     self.type = 'html'
                 except IOError:
-                    self.app.stop("Error: there was an error while reading template from stdin.")
+                    self.app.stop("Error: there was an error while reading template from stdin.", 1)
         else:
             try:
                 self.in_package_file = zipfile.ZipFile(self.in_package_name,'r')
@@ -1944,7 +2375,7 @@ class DocumentArchive:
                 self.in_package_file = open(self.in_package_name,'r')
                 self.inner_filenames = [self.in_package_name]
                 self.type = 'html'
-        
+
     def read(self, filename_regex):
         '''read file(s) from package into temporary files'''
         if self.type == 'zip':
@@ -1952,7 +2383,7 @@ class DocumentArchive:
                 match = re.match(filename_regex, inner_filename)
                 if match:
                     if inner_filename not in self.fileobject_list:  # this is a new request, else ignore
-                        self.fileobject_list[inner_filename] = TemporaryFile(max_size=self.max_buffer)         
+                        self.fileobject_list[inner_filename] = TemporaryFile(max_size=self.max_buffer)
                         self.fileobject_list[inner_filename].write(self.in_package_file.read(inner_filename))
                         self.fileobject_list[inner_filename].seek(0)
                         if re.match(self.target_filename_pattern, inner_filename):
@@ -1962,7 +2393,7 @@ class DocumentArchive:
             if not filename_regex:
                 filename_regex = self.in_package_name
             if filename_regex not in self.fileobject_list:  # if it's already in the list, don't reopen
-                self.fileobject_list[filename_regex] = TemporaryFile(max_size=self.max_buffer)  
+                self.fileobject_list[filename_regex] = TemporaryFile(max_size=self.max_buffer)
                 self.fileobject_list[filename_regex].seek(0)
                 if sys.version_info[0] == 2:
                     self.fileobject_list[filename_regex].write(bytes(self.in_package_file.read()))
@@ -1975,44 +2406,49 @@ class DocumentArchive:
                     else:
                         self.fileobject_list[filename_regex].write(self.in_package_file.read())
                 self.fileobject_list[filename_regex].seek(0)
-    
+
     def all_zip_names(self):
         return self.inner_filenames
-    
+
     def loaded_files(self):
         return self.fileobject_list
-    
+
     def prioritized_filename_list(self):
         '''set the order of files for specific document types'''
         filename_list = list(self.fileobject_list.keys())
         if self.app.doctype == 'ods' and 'content.xml' in filename_list:  # put content.xml in 1st position
             target_index = filename_list.index('content.xml')
             filename_list[0], filename_list[target_index] = filename_list[target_index], filename_list[0]
-        elif self.app.doctype == 'xlsx' and 'xl/worksheets/sheet1.xml' in filename_list:
-            target_index = filename_list.index('xl/worksheets/sheet1.xml')
-            filename_list[0], filename_list[target_index] = filename_list[target_index], filename_list[0]
+        elif self.app.doctype == 'xlsx':
+            if 'xl/worksheets/sheet1.xml' in filename_list:
+                target_index = filename_list.index('xl/worksheets/sheet1.xml')
+                filename_list[0], filename_list[target_index] = filename_list[target_index], filename_list[0]
+            if 'xl/sharedStrings.xml' in filename_list:
+                last_index = len(filename_list) - 1
+                string_index = filename_list.index('xl/sharedStrings.xml')
+                filename_list[last_index], filename_list[string_index] = filename_list[string_index], filename_list[last_index]
         return filename_list
-    
+
     def set_target_filename(self, filename):
         self.target_filename = filename
-    
+
     def get_target_file(self):
         if self.target_filename in self.fileobject_list:
             return self.fileobject_list[self.target_filename]
         else:
             return None
-        
+
     def inner_file_object(self, filename):
         if filename in self.fileobject_list:
             return self.fileobject_list[filename]
         else:
             return None
-        
+
     def replace_file_object(self, filename, file_object):
         if filename in self.fileobject_list:
             self.fileobject_list[filename].close()
         self.fileobject_list[filename] = file_object
-        
+
     def save(self, out_file_name):
         '''save the fileobject_list or original files into a new zip file.'''
         error_message = "No files inserted."
@@ -2029,7 +2465,7 @@ class DocumentArchive:
                 else: # html
                     outputfile = open(out_file_name,'w')
             except Exception:
-                self.app.stop("Error opening output: " + out_file_name)
+                self.app.stop("Error opening output: " + out_file_name, 1)
         try:
             if self.type == 'zip':
                 for name in self.in_package_file.namelist():
@@ -2037,9 +2473,11 @@ class DocumentArchive:
                         self.fileobject_list[name].seek(0)
                         if self.fileobject_list[name].is_in_ram:
                             outputfile.writestr(name, self.fileobject_list[name].read())
+                            self.fileobject_list[name].close()
                         else:
+                            self.fileobject_list[name].release()
                             outputfile.write(self.fileobject_list[name].name, name)
-                        self.fileobject_list[name].close()
+                            self.fileobject_list[name].remove()
                         error_message = None
                     elif name == "mimetype":  # write the mimetype file to output, it is the 1st file and uncompressed
                         mimetype_info = self.in_package_file.getinfo("mimetype")  # this saves the compression type of mimetype (stored) so that it will be saved the same type of compression
@@ -2047,7 +2485,7 @@ class DocumentArchive:
                     else:  # write all other files to output without modification
                         outputfile.writestr(name, self.in_package_file.read(name))
                 outputfile.close()
-            else:  
+            else:
                 file = self.fileobject_list[self.in_package_name]
                 if file:
                     file.seek(0)
@@ -2067,10 +2505,11 @@ class DocumentArchive:
                     except TypeError:
                         buffer.seek(0)
                         sys.stdout.write(buffer.read())
+                buffer.close()
             outputfile.close()
             self.in_package_file.close()
         self.app.warning(error_message)
-    
+
     def direct_save(self, file):
         file.seek(0)
         if self.app.out_filename == "stdout":  # send the output to stdout
@@ -2086,8 +2525,9 @@ class DocumentArchive:
             try:
                 outputfile = open(self.app.out_filename,'wb')
             except Exception:
-                self.app.stop("Error opening output: " + self.app.out_filename)
+                self.app.stop("Error opening output: " + self.app.out_filename, 1)
             self.write_output(file, outputfile)
+            outputfile.close()
 
     def write_output(self, in_file, out_file):
         if sys.version_info[0] == 2:
@@ -2100,7 +2540,12 @@ class DocumentArchive:
                 out_file.write(in_file.read().decode('UTF-8'))
             else:
                 out_file.write(bytes(in_file.read().decode('UTF-8'), 'UTF-8'))
-            
+
+    def close(self):
+        self.in_package_file.close()
+        for name in self.fileobject_list:
+            self.fileobject_list[name].close()
+
     # end class DocumentArchive
 
 
@@ -2108,24 +2553,32 @@ class IncomingDataSource:
 
     #properties
     app = None
-    type = None
     buffer = []
     inputfile = None
     reader = None
-    num_rows = 0
+    num_raw_rows = 0     # the number of actual rows in the file
+    num_rows = 0         # the number of usable rows after applying that app start and stop limits
+    data_row_index = -1  # index number of current row, 1st row = 0
     num_columns = 0
     max_buffer = 20e6
+    start_index = 0
+    stop_index = None
 
     def __init__(self, app):
         self.app = app
-        self.open(self.app.csv_filename)
+        self.start_index = app.start - 1
+        if app.end:
+            self.stop_index = app.end - app.start
+        if not app.nodata:
+            self.open(self.app.csv_filename)
+        self.max_buffer = self.app.max_buffer
 
     def open(self, filename):
         '''Prepare a csv file for reading.'''
         import csv
         if filename == "stdin":
             if sys.stdin.isatty():
-                self.app.stop("Error: there was no template file specified.")
+                self.app.stop("Error: there was no template file specified. 2", 1)
             else:
                 self.inputfile = TemporaryFile(self.max_buffer, 'w')  # inputfile needs to be seekable, so load stdin to a tempfile
                 if sys.version_info[0] == 2:
@@ -2140,11 +2593,22 @@ class IncomingDataSource:
                 self.inputfile = open(filename, 'r', newline='')
         self.reader = csv.reader(self.inputfile, delimiter=self.app.delimiter)
         self.profile()
-    
+        if self.start_index:
+            data_row_index = 0
+            while self.reader and data_row_index < self.start_index:  # skip the rows before start_index
+                if sys.version_info[0] == 2:
+                    self.reader.next()
+                else:
+                    self.reader.__next__()
+                data_row_index += 1
+
     def profile(self):
         '''Scan over the csv file and find the number of rows and the length of the longest line.'''
-        for row in self:
-            self.num_rows += 1
+        for row in self.reader:
+            self.num_raw_rows += 1
+            if self.num_raw_rows >= self.app.start and (self.app.end is None
+                or self.num_raw_rows <= self.app.end):
+                self.num_rows += 1
             num_columns = 0
             for column in row:
                 num_columns += 1
@@ -2152,20 +2616,38 @@ class IncomingDataSource:
                 self.num_columns = num_columns
         self.inputfile.seek(0)
 
+    def row_index(self):
+        if self.data_row_index >= 0:
+            return self.data_row_index
+        else:  # when data_row_index is -1, return 0 instead
+            return 0
+
+    def subtract(self):
+        self.data_row_index -= 1
+
     def __iter__(self):
         return self
 
     def next(self):  # used by python 2.x
-        return self.__next__()
-          
+        if not self.reader:
+            raise StopIteration
+        if self.stop_index and self.data_row_index >= self.stop_index:
+            raise StopIteration
+        data = self.reader.next()
+        if data:
+            self.data_row_index += 1
+        return data
+
     def __next__(self):
         if not self.reader:
             raise StopIteration
-        if sys.version_info[0] == 2:
-            return self.reader.next()
-        else:
-            return self.reader.__next__()
-          
+        if self.stop_index and self.data_row_index >= self.stop_index:
+            raise StopIteration
+        data = self.reader.__next__()
+        if data:
+            self.data_row_index += 1
+        return data
+
     def close(self):
         if self.inputfile is not None:
             self.inputfile.close()
@@ -2174,33 +2656,55 @@ class IncomingDataSource:
 
 
 if __name__ == "__main__":
+    '''file_text = ''.join(['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        ,'<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac"><numFmts count="4"><numFmt numFmtId="164" formatCode="[$-F800]dddd\,\ mmmm\ dd\,\ yyyy"/><numFmt numFmtId="165" formatCode="#,##0.00;[Red]\-#,##0.00"/><numFmt numFmtId="166" formatCode="mm/dd/yyyy\ hh:mm"/><numFmt numFmtId="167" formatCode="ddd\,\ mmm\ dd\ yyyy\ hh:mm"/></numFmts><fonts count="5" x14ac:knownFonts="1"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font><font><b/><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font><font><sz val="11"/><color theme="1"/><name val="Webdings"/><family val="1"/><charset val="2"/></font><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font><font><u/><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF60C0C0"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFC8E8E8"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="21"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="right"/></xf><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="165" fontId="4" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="167" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="1" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="3" fontId="0" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" quotePrefix="1"/><xf numFmtId="22" fontId="0" fillId="0" borderId="0" xfId="0" quotePrefix="1" applyNumberFormat="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1"/></xf><xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf><xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><dxfs count="3"><dxf><fill><patternFill><bgColor rgb="FFFF0000"/></patternFill></fill></dxf><dxf><fill><patternFill><bgColor rgb="FFFF0000"/></patternFill></fill></dxf><dxf><font><color rgb="FF0070C0"/></font></dxf></dxfs><tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/><colors><mruColors>'
+        ,'<color rgb="FFC8E8E8"/><color rgb="FF60C0C0"/><color rgb="FF40A0A0"/><color rgb="FF319A9F"/></mruColors></colors><extLst><ext uri="{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:slicerStyles defaultSlicerStyle="SlicerStyleLight1"/></ext></extLst></styleSheet>'])
+
+    styler = StyleFileReader(file_text)
+    print(styler.is_a_date_cell(1))
+    print(styler.is_a_date_cell(2))
+    print(styler.is_a_date_cell(3))'''
+
+
     app = ApplicationController()
     model = DocumentModel(app)
-    zip = DocumentArchive(app, model)
-    special_strings = SpecialStringSubstitutionProcessor(app.comment)
-    csv_merge_processor = CSVMergeProcessor(app, model)
-    document_processor = DocumentProcessor(app, model, csv_merge_processor, special_strings)
-    zip.open(app.template_filename)
-    zip.read(model.inner_filename_regex())
-    if app.doctype == 'xlsx':
-        string_file = SharedStringFile(zip.inner_file_object('xl/sharedStrings.xml'), special_strings, app.debug)
-        csv_merge_processor.set_string_file(string_file)
-        document_processor.set_string_file(string_file)
-        document_processor.load_sheet_index(zip.inner_file_object('xl/workbook.xml'))
-    if app.xml:
-        zip.direct_save(document_processor.scan(zip.get_target_file(), True, zip.target_filename))
-    else:
-        for filename in zip.prioritized_filename_list():
-            if app.debug:
-                sys.stderr.write("processing file: "+filename+"\n")
-            if app.doctype == 'html' or re.match(zip.target_filename_pattern, filename):  # process only target in this loop
-                replacement = document_processor.scan(zip.inner_file_object(filename), True, filename)
-                zip.replace_file_object(filename, replacement)
-            elif filename != 'xl/sharedStrings.xml': 
-                replacement = document_processor.scan(zip.inner_file_object(filename), False, filename)
-                zip.replace_file_object(filename, replacement)
+    position = DocumentNavigator(app)
+    try:
+        zip = DocumentArchive(app, model)
+        special_strings = SpecialStringSubstitutionProcessor(app.comment)
+        csv_merge_processor = CSVMergeProcessor(app, model, position)
+        document_processor = DocumentProcessor(app, model, position, csv_merge_processor, special_strings)
+        zip.open(app.template_filename)
+        zip.read(model.inner_filename_regex())
         if app.doctype == 'xlsx':
-            zip.replace_file_object('xl/sharedStrings.xml', string_file.finish())
-        zip.save(app.out_filename)
-
-
+            string_file = SharedStringFile(zip.inner_file_object('xl/sharedStrings.xml'), special_strings, app.max_buffer, app.debug)
+            style_file = StyleFileReader(zip.inner_file_object('xl/styles.xml').read())
+            csv_merge_processor.set_string_and_style_files(string_file, style_file)
+            document_processor.set_string_file(string_file)
+            document_processor.load_sheet_index(zip.inner_file_object('xl/workbook.xml'))
+            if position.target_table_num in document_processor.table_index:
+                position.set_target_table_name(document_processor.table_index[position.target_table_num])
+        if app.xml:
+            position.set_in_target_file(True)
+            zip.direct_save(document_processor.scan(zip.get_target_file(), zip.target_filename))
+        else:
+            for filename in zip.prioritized_filename_list():
+                if app.doctype == 'xlsx':  # set table name
+                    match = re.match('xl/worksheets/sheet([0-9]+)\.xml', filename)
+                    if match:
+                        position.set_table_name(document_processor.table_index[int(match.group(1))], int(match.group(1)))
+                if app.debug:
+                    sys.stderr.write("processing file: "+filename+"\n")
+                if filename == 'xl/sharedStrings.xml':
+                    zip.replace_file_object('xl/sharedStrings.xml', string_file.finish())
+                else:
+                    position.set_in_target_file(app.doctype == 'html'
+                                                or re.match(zip.target_filename_pattern, filename) is not None)
+                    replacement = document_processor.scan(zip.inner_file_object(filename), filename)
+                    zip.replace_file_object(filename, replacement)
+            zip.save(app.out_filename)
+    except:
+        if app.debug:
+            sys.stderr.write("Error Report:\n")
+            sys.stderr.write(position.describe())
+        raise
