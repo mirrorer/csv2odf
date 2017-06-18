@@ -1,8 +1,8 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# csv2odf  v2.06
-# Copyright (C) 2016 Larry Jordan <w322 at users.sourceforge.net>
+# csv2odf  v2.07
+# Copyright (C) 2017 Larry Jordan <w322 at users.sourceforge.net>
 
 '''Convert a csv file to odf, ods, html, xlsx,
  or docx format.  csv2odf is a command line tool that
@@ -64,7 +64,7 @@ import cgi
 class ApplicationController:
     '''This class is responsible for reading user options and communicating options to the program.'''
 
-    VERSION = "2.06"
+    VERSION = "2.07"
 
     # default properties
     ENCODING = "UTF-8"    # The encoding to use with unicode, init sets to sys.getfilesystemencoding()
@@ -366,7 +366,7 @@ class ApplicationController:
     def parse_args(self, arguments):
         '''parse an argument string'''
         if isinstance(arguments, self.text_type()):
-            arguments = shlex.split(arguments)  # aplit arguments into a list
+            arguments = shlex.split(arguments)  # split arguments into a list
         try:
             optionlist, argumentlist = getopt.gnu_getopt(arguments, u"ahHqvxnVzs:t:e:c:Dd:S:o:",
                 [u"input=", u"template=", u"output=", u"comment=", u"div",
@@ -2198,7 +2198,10 @@ class SharedStringFile:
                                                 match.group(3)]), chunk)
         self.out_file.write(chunk)  #write the first chunk to out_file
         #read remaining data from intermediate_file and write out
-        self.out_file.write(self.intermediate_file.read().decode(self.app.ENCODING))
+        chunk = self.intermediate_file.read(self.chunk_size).decode(self.app.ENCODING)
+        while len(chunk) > 0:
+          self.out_file.write(chunk)
+          chunk = self.intermediate_file.read(self.chunk_size).decode(self.app.ENCODING)
         self.intermediate_file.close()
         return self.out_file
 
