@@ -1,10 +1,16 @@
+csv2odf (2.06) unstable; urgency=low
+
+  * Fixed bug #8 error handling unicode.
+
+ -- Larry Jordan <w322@users.sourceforge.net>  Mon, 12 Dec 2016 17:59:04 -0500
+
 csv2odf (2.05) unstable; urgency=low
 
   * Fixed bug #6 --template option did not work.
   * Fixed bug #7 xlsx mangled output.
   * Improved handling of unicode characters.
 
- -- Larry Jordan <w322@users.sourceforge.net>  Mon, 25 Apr 2016 20:44:56 -0400
+ -- Larry Jordan <w322@users.sourceforge.net>  Tue, 26 Apr 2016 07:03:09 -0400
 
 csv2odf (2.04) unstable; urgency=low
 
