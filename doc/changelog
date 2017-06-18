@@ -1,3 +1,9 @@
+csv2odf (2.08) unstable; urgency=low
+
+  * Bugfix unicode regression, filter offset.
+
+ -- Larry Jordan <w322@users.sourceforge.net>  Mon, 13 Feb 2017 22:30:53 -0500
+
 csv2odf (2.07) unstable; urgency=low
 
   * Bugfix for memory error with xlsx and large csv files.

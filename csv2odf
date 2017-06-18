@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# csv2odf  v2.07
+# csv2odf  v2.08
 # Copyright (C) 2017 Larry Jordan <w322 at users.sourceforge.net>
 
 '''Convert a csv file to odf, ods, html, xlsx,
@@ -64,7 +64,7 @@ import cgi
 class ApplicationController:
     '''This class is responsible for reading user options and communicating options to the program.'''
 
-    VERSION = "2.07"
+    VERSION = "2.08"
 
     # default properties
     ENCODING = "UTF-8"    # The encoding to use with unicode, init sets to sys.getfilesystemencoding()
@@ -856,7 +856,6 @@ class DocumentNavigator:
         if self.table_depth == 1:
             self.table_num += 1
             self.table_name = None
-            self.option_row_offset = 0
             self.in_row_num = 0
             self.row_depth = 0
 
@@ -1020,10 +1019,15 @@ class DocumentNavigator:
             data_row_index = self.num_inserted_rows - 1
         else:
             data_row_index = 0
+        # --- set option_row_offset
+        if self.in_table_1():
+            option_row_offset = self.option_row_offset
+        else:
+            option_row_offset = 0
         if self.debug in ['all', 'output_row_num']:
             sys.stderr.write(u"In table "+self.app.to_unicode(self.table_name)+u" row "+self.app.to_unicode(self.in_row_num + data_row_index + self.option_row_offset + self.append_offset)+u"=")
             sys.stderr.write(self.app.to_unicode(self.in_row_num)+u" "+self.app.to_unicode(data_row_index)+u" "+self.app.to_unicode(self.option_row_offset)+u" "+self.app.to_unicode(self.append_offset)+u"\n")
-        return self.in_row_num + data_row_index + self.option_row_offset + self.append_offset
+        return self.in_row_num + data_row_index + option_row_offset + self.append_offset
 
     def reference_adjust(self, row_num, table_name=None, expand_target_range=False):
         '''Calculate the output row num from given table and row num
@@ -1722,13 +1726,13 @@ class SequentialChunkFeeder:
         overlap = u""
         keep_going = False
         # get a chunk
-        new_chunk = in_file.read(self.chunk_size).decode(self.app.ENCODING)
+        new_chunk = in_file.read_unicode()
         while new_chunk:
             chunk = u''.join([overlap, new_chunk])
             # process chunk
             overlap, keep_going = chunk_processor(chunk)
             if keep_going:  # get a new chunk
-                new_chunk = in_file.read(self.chunk_size).decode(self.app.ENCODING)
+                new_chunk = in_file.read_unicode()
             else:
                 new_chunk = None
         # process the remaining string
@@ -2180,7 +2184,7 @@ class SharedStringFile:
         self.write_intermediate(self.LIST_END)
         # read first chunk and replace count
         self.intermediate_file.seek(0)
-        chunk = self.intermediate_file.read(self.chunk_size).decode(self.app.ENCODING)
+        chunk = self.intermediate_file.read_unicode()
         count_regex_string = r'(<sst[^>]*count=[\"\'])([0-9]+)([\"\'][^>]*>)'
         #                     (<sst  *  count=      )(number)(     *     >)
         #                            group 1          group 2    group 3
@@ -2198,10 +2202,10 @@ class SharedStringFile:
                                                 match.group(3)]), chunk)
         self.out_file.write(chunk)  #write the first chunk to out_file
         #read remaining data from intermediate_file and write out
-        chunk = self.intermediate_file.read(self.chunk_size).decode(self.app.ENCODING)
-        while len(chunk) > 0:
+        chunk = self.intermediate_file.read_unicode()
+        while chunk:
           self.out_file.write(chunk)
-          chunk = self.intermediate_file.read(self.chunk_size).decode(self.app.ENCODING)
+          chunk = self.intermediate_file.read_unicode()
         self.intermediate_file.close()
         return self.out_file
 
@@ -2297,6 +2301,32 @@ class TemporaryFile:
                 return self.disk_file.read(number_of_bytes)
             else:
                 return self.disk_file.read()
+
+    def read_unicode(self, number_of_bytes=None):
+      '''Read a chunk and decode, if the chunk ended in the middle of a unicode char, read an extra char.'''
+      success = False
+      tries = 0
+      if self.is_in_ram:
+        raw_chunk = self.ram_file.read(number_of_bytes)
+      else:
+        raw_chunk = self.disk_file.read(number_of_bytes)
+      if len(raw_chunk) > 0:
+        while not success:
+          try:
+            new_chunk = raw_chunk.decode(self.app.ENCODING)
+            success = True
+          except UnicodeDecodeError:
+            tries += 1
+            if tries > 10:
+              raise
+            if self.is_in_ram:
+              extra_char = self.ram_file.read(1)
+            else:
+              extra_char = self.disk_file.read(1)
+            raw_chunk += extra_char
+        return new_chunk
+      else:
+        return None
 
     def __iter__(self):
         return self
