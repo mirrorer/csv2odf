@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# csv2odf  v2.08
+# csv2odf  v2.09
 # Copyright (C) 2017 Larry Jordan <w322 at users.sourceforge.net>
 
 '''Convert a csv file to odf, ods, html, xlsx,
@@ -64,10 +64,12 @@ import cgi
 class ApplicationController:
     '''This class is responsible for reading user options and communicating options to the program.'''
 
-    VERSION = "2.08"
+    VERSION = "2.09"
 
     # default properties
-    ENCODING = "UTF-8"    # The encoding to use with unicode, init sets to sys.getfilesystemencoding()
+    input_encoding = u"UTF-8" # The encoding to use with unicode, init sets to sys.getfilesystemencoding()
+    document_encoding = u"UTF-8" # documents always use utf-8
+    csv_encoding = u"UTF-8" # The encoding to use with csv data file, can be changed with the -E option
     quiet = 0             # show no output
     verbose = 0           # show extra output
     showhelp = 0          # display help text instead of processing document
@@ -170,6 +172,15 @@ class ApplicationController:
         print(u"       matted cells in the template.  In xlsx files you must mark  date")
         print(u"       cells  with  the text [csv2odf-date] (csv2odf-date inside square")
         print(u"       brackets).")
+        print(u"")
+        print(u"-E <encoding>, --csv-encoding=<encoding>")
+        print(u"       specify the encoding used in the csv file.  A list of  available")
+        print(u"       encoding  names  can  be  found at")
+        print(u"       https://docs.python.org/3/library/codecs.html#standard-encodings")
+        print(u"")
+        print(u"--default-csv-encoding")
+        print(u"       display the default encoding  for  csv  files.   This  value  is")
+        print(u"       system dependent.")
         print(u"")
         print(u"OPTIONS FOR PROCESSING TEMPLATE FILE")
         print(u"-H     insert the first csv row into the header")
@@ -291,13 +302,23 @@ class ApplicationController:
         else:
             return bytes
     
-    def to_unicode(self, var):
+    def to_input_unicode(self, var):
         if isinstance(var, self.text_type()):
             return var
         elif sys.version_info[0] == 2:
-            return str(var).decode(self.ENCODING)
+            return str(var).decode(self.input_encoding)
         elif isinstance(var, self.binary_type()):
-            return var.decode(self.ENCODING)
+            return var.decode(self.input_encoding)
+        else:
+            return str(var)
+
+    def to_document_unicode(self, var):
+        if isinstance(var, self.text_type()):
+            return var
+        elif sys.version_info[0] == 2:
+            return str(var).decode(self.document_encoding)
+        elif isinstance(var, self.binary_type()):
+            return var.decode(self.document_encoding)
         else:
             return str(var)
 
@@ -340,14 +361,10 @@ class ApplicationController:
         arguments_in = sys.argv[1:]
         if arguments_in:
             if self.debug:
-                sys.stderr.write(u"Command line options: "+self.to_unicode(arguments_in)+u"\n")
-            if sys.stdin.encoding:
-                input_encoding = sys.stdin.encoding
-            else:
-                input_encoding = sys.getfilesystemencoding()
+                sys.stderr.write(u"Command line options: "+self.to_input_unicode(arguments_in)+u"\n")
             self.arguments = []
             for arg in arguments_in:
-                arg = self.to_unicode(arg)
+                arg = self.to_input_unicode(arg)
                 arg = self.replacement(arg, u"'", u'"')
                 self.arguments.append(arg)
             self.parse_args(self.arguments)
@@ -368,10 +385,10 @@ class ApplicationController:
         if isinstance(arguments, self.text_type()):
             arguments = shlex.split(arguments)  # split arguments into a list
         try:
-            optionlist, argumentlist = getopt.gnu_getopt(arguments, u"ahHqvxnVzs:t:e:c:Dd:S:o:",
+            optionlist, argumentlist = getopt.gnu_getopt(arguments, u"ahHqvxnVzs:t:e:c:Dd:S:o:E:",
                 [u"input=", u"template=", u"output=", u"comment=", u"div",
                     u"template-stdin-ods", u"template-stdin-odt", u"template-stdin-html",
-                    u"template-stdin-xlsx", u"template-stdin-docx"])
+                    u"template-stdin-xlsx", u"template-stdin-docx", u"csv-encoding=", u"default-csv-encoding"])
         except getopt.GetoptError:
             self.warning(u"Error processing arguments, outputting help infomation.")
             self.help()
@@ -458,6 +475,10 @@ class ApplicationController:
                 self.doctype = u"docx"
             elif o == u"-z":
                 self.debug = 1
+            elif o == u"-E" or o == u"--csv-encoding":
+                self.csv_encoding = a
+            elif o == u"--default-csv-encoding":
+                self.stop(u"Default encoding for csv file: "+self.csv_encoding)
             else:
                 self.stop(u"Error: Unrecognized option "+o, 1)
         if self.showhelp:
@@ -560,6 +581,11 @@ class ApplicationController:
 
 
     def __init__(self, debug=0):
+        if sys.stdin.encoding:
+            self.input_encoding = sys.stdin.encoding
+        else:
+            self.input_encoding = sys.getfilesystemencoding()
+        self.csv_encoding = sys.getfilesystemencoding()
         if not debug:
             self.get_args()
 
@@ -1025,8 +1051,8 @@ class DocumentNavigator:
         else:
             option_row_offset = 0
         if self.debug in ['all', 'output_row_num']:
-            sys.stderr.write(u"In table "+self.app.to_unicode(self.table_name)+u" row "+self.app.to_unicode(self.in_row_num + data_row_index + self.option_row_offset + self.append_offset)+u"=")
-            sys.stderr.write(self.app.to_unicode(self.in_row_num)+u" "+self.app.to_unicode(data_row_index)+u" "+self.app.to_unicode(self.option_row_offset)+u" "+self.app.to_unicode(self.append_offset)+u"\n")
+            sys.stderr.write(u"In table "+self.app.to_input_unicode(self.table_name)+u" row "+self.app.to_input_unicode(self.in_row_num + data_row_index + self.option_row_offset + self.append_offset)+u"=")
+            sys.stderr.write(self.app.to_input_unicode(self.in_row_num)+u" "+self.app.to_input_unicode(data_row_index)+u" "+self.app.to_input_unicode(self.option_row_offset)+u" "+self.app.to_input_unicode(self.append_offset)+u"\n")
         return self.in_row_num + data_row_index + option_row_offset + self.append_offset
 
     def reference_adjust(self, row_num, table_name=None, expand_target_range=False):
@@ -1082,8 +1108,8 @@ class DocumentNavigator:
             else:
                 insert_rows_offset = 0
             if self.debug in ['all', 'reference_adjust']:
-                sys.stderr.write(u"In table "+self.app.to_unicode(table_name)+u" row "+self.app.to_unicode(row_num + option_row_offset + template_row_offset + self.append_offset + insert_rows_offset)+u"=")
-                sys.stderr.write(self.app.to_unicode(row_num)+u" "+self.app.to_unicode(option_row_offset)+u" "+self.app.to_unicode(template_row_offset)+u" "+self.app.to_unicode(self.append_offset)+u" "+self.app.to_unicode(insert_rows_offset)+"\n")
+                sys.stderr.write(u"In table "+self.app.to_input_unicode(table_name)+u" row "+self.app.to_input_unicode(row_num + option_row_offset + template_row_offset + self.append_offset + insert_rows_offset)+u"=")
+                sys.stderr.write(self.app.to_input_unicode(row_num)+u" "+self.app.to_input_unicode(option_row_offset)+u" "+self.app.to_input_unicode(template_row_offset)+u" "+self.app.to_input_unicode(self.append_offset)+u" "+self.app.to_input_unicode(insert_rows_offset)+"\n")
             return row_num + option_row_offset + template_row_offset + self.append_offset + insert_rows_offset
         elif self.refers_to_table_1(table_name):
             return row_num + self.option_row_offset
@@ -1137,18 +1163,18 @@ class DocumentNavigator:
         return letter
 
     def describe(self):
-        output = u"table["+self.app.to_unicode(self.table_num)
-        output += u"("+self.app.to_unicode(self.table_name)+u")"
-        output += u" depth="+self.app.to_unicode(self.table_depth)
-        output += u" target="+self.app.to_unicode(self.target_table_num)+u"("+self.app.to_unicode(self.target_table_name)+u")]"
-        output += u" row[in="+self.app.to_unicode(self.in_row_num)
-        output += u" out="+self.app.to_unicode(self.output_row_num())
-        output += u" depth="+self.app.to_unicode(self.row_depth)
+        output = u"table["+self.app.to_input_unicode(self.table_num)
+        output += u"("+self.app.to_input_unicode(self.table_name)+u")"
+        output += u" depth="+self.app.to_input_unicode(self.table_depth)
+        output += u" target="+self.app.to_input_unicode(self.target_table_num)+u"("+self.app.to_input_unicode(self.target_table_name)+u")]"
+        output += u" row[in="+self.app.to_input_unicode(self.in_row_num)
+        output += u" out="+self.app.to_input_unicode(self.output_row_num())
+        output += u" depth="+self.app.to_input_unicode(self.row_depth)
         output += u" position cd="+self.row_position_code()
-        output += u" table1_nm="+self.app.to_unicode(self.table_1_name)
-        output += u" file["+self.app.to_unicode(self.file_name)
-        output += u" target="+self.app.to_unicode(self.in_target_file)
-        output += u" type="+self.app.to_unicode(self.document_type)+u"]\n"
+        output += u" table1_nm="+self.app.to_input_unicode(self.table_1_name)
+        output += u" file["+self.app.to_input_unicode(self.file_name)
+        output += u" target="+self.app.to_input_unicode(self.in_target_file)
+        output += u" type="+self.app.to_input_unicode(self.document_type)+u"]\n"
         return output
 
     # end class DocumentNavigator
@@ -1239,7 +1265,7 @@ class CSVMergeProcessor:
             data_row:        a list of csv data items
            Output:           a row of xml cell with csv data merged into it'''
         if self.app.debug:
-            sys.stderr.write(u"Sheet row: "+self.app.to_unicode(self.position.output_row_num())+u"\n")
+            sys.stderr.write(u"Sheet row: "+self.app.to_input_unicode(self.position.output_row_num())+u"\n")
         output_row = self.template_elem.cloneNode(True)
         while output_row.childNodes.length > 0:
             output_row.removeChild(output_row.lastChild)
@@ -1248,7 +1274,7 @@ class CSVMergeProcessor:
             if not output_row.hasAttribute('r'):
                 ref_node = self.template.createAttribute('r')
                 output_row.setAttributeNode(ref_node)
-            output_row.setAttribute(u'r', self.app.to_unicode(self.position.output_row_num()))
+            output_row.setAttribute(u'r', self.app.to_document_unicode(self.position.output_row_num()))
         for node in self.template_elem.childNodes:
             new_node = node.cloneNode(True)
             if re.match(self.model.cell_regex(), node.nodeName):
@@ -1363,7 +1389,7 @@ class CSVMergeProcessor:
                         style_index = int(output_cell.getAttribute('s'))
                         if self.style.is_a_date_cell(style_index):  # it's a date cell
                             if self.app.debug:
-                                sys.stderr.write(u"Date: "+data_item+u" = "+self.app.to_unicode(self.format_date(data_item)+u"\n"))
+                                sys.stderr.write(u"Date: "+data_item+u" = "+self.app.to_input_unicode(self.format_date(data_item)+u"\n"))
                             cell_value.firstChild.data = self.format_date(data_item)
                         else:
                             cell_value.firstChild.data = data_item  # it's a number cell
@@ -1414,7 +1440,7 @@ class CSVMergeProcessor:
         while output_row.childNodes.length > 0:
             output_row.removeChild(output_row.lastChild)
         if self.app.doctype == 'xlsx' and output_row.hasAttribute('r'):
-            output_row.setAttribute('r', self.app.to_unicode(self.position.output_row_num(data_row_index)))
+            output_row.setAttribute('r', self.app.to_document_unicode(self.position.output_row_num(data_row_index)))
         for node in self.template_elem.childNodes:
             new_node = node.cloneNode(True)
             if new_node.hasChildNodes() and re.match(self.model.cell_regex(), node.nodeName):
@@ -1443,7 +1469,7 @@ class CSVMergeProcessor:
                 self.app.stop("The date format ["+self.app.dateformat
                               +"] could not be interpreted for data: "+date_in, 1)
             if self.app.doctype == 'xlsx':
-                return self.app.to_unicode(date.toordinal() - self.EPOCH + 1.0*date.time().hour/24
+                return self.app.to_document_unicode(date.toordinal() - self.EPOCH + 1.0*date.time().hour/24
                            + 1.0*date.time().minute/1440)
             else:
                 return date.strftime('%Y-%m-%dT%H:%M:%S')
@@ -1453,7 +1479,7 @@ class CSVMergeProcessor:
     def create_cell_node(self, data_string, content, column_number, row_number=1):
         new_cell_node = content.createElement(self.model.cell_tagname(0)[0])
         if self.app.doctype == 'xlsx':
-            index = self.app.to_unicode(self.string_file.append(data_string))
+            index = self.app.to_document_unicode(self.string_file.append(data_string))
             if self.model.textnode_regex() is None:
                 new_cell_node.appendChild(content.createTextNode(index))
             else:
@@ -1461,7 +1487,7 @@ class CSVMergeProcessor:
                 new_text_node.appendChild(content.createTextNode(index))
                 new_cell_node.appendChild(new_text_node)
             new_cell_node.setAttribute('t', 's')
-            new_cell_node.setAttribute('r', self.column_letter(column_number)+self.app.to_unicode(row_number))
+            new_cell_node.setAttribute('r', self.column_letter(column_number)+self.app.to_document_unicode(row_number))
         else:
             if self.model.textnode_regex() is None:
                 new_cell_node.appendChild(content.createTextNode(data_string))
@@ -1620,14 +1646,14 @@ class FormulaAdjustmentProcessor:
                     new_row_ref = self.position.reference_adjust(row_ref, table_ref)
                     if match.group(5):  # there is a range reference
                         range_end_ref = int(match.group(9))
-                        new_range_end_ref = self.app.to_unicode(self.position.reference_adjust(range_end_ref, table_ref, True))
+                        new_range_end_ref = self.app.to_document_unicode(self.position.reference_adjust(range_end_ref, table_ref, True))
                         if match.group(6):
                             new_range_end_ref = u''.join([':', match.group(6), match.group(8), new_range_end_ref])
                         else:
                             new_range_end_ref = u''.join([':', match.group(8), new_range_end_ref])
                     elif (not self.position.in_insert_row()
                           and self.position.refers_to_insert_row(new_row_ref, table_ref)):
-                        new_range_end_ref = self.app.to_unicode(self.position.reference_adjust(new_row_ref, table_ref, True))
+                        new_range_end_ref = self.app.to_document_unicode(self.position.reference_adjust(new_row_ref, table_ref, True))
                         new_range_end_ref = u''.join([':', match.group(3), new_range_end_ref])
                     else:
                         new_range_end_ref = u""
@@ -1642,7 +1668,7 @@ class FormulaAdjustmentProcessor:
                             table_ref,
                             '<',
                             match.group(3),
-                            self.app.to_unicode(new_row_ref),
+                            self.app.to_document_unicode(new_row_ref),
                             '>',
                             new_range_end_ref ])
                     else:
@@ -1651,7 +1677,7 @@ class FormulaAdjustmentProcessor:
                             formula[previous_match:match.start()],
                             table_ref,
                             match.group(3),
-                            self.app.to_unicode(new_row_ref),
+                            self.app.to_document_unicode(new_row_ref),
                             new_range_end_ref ])
                     previous_match = match.end()
                 else:
@@ -1701,7 +1727,7 @@ class FormulaAdjustmentProcessor:
                 col_letter = match.group(1)
             else:
                 col_letter = u''
-            new_address = col_letter + self.app.to_unicode(self.position.output_row_num())
+            new_address = col_letter + self.app.to_document_unicode(self.position.output_row_num())
             cell_dom.setAttribute('r', new_address)
             return new_address
 
@@ -1752,6 +1778,7 @@ class DocumentProcessor:
     string_file = None   # an object that handles the string file for xlsx
     special_strings = None # an object that can replace special string
     out_file = None      # a file object
+    document_encoding = u"UTF-8"
     EMPTY_STRING = u"" 
     max_buffer = 20e6    # the maximum memory size used before the buffer is written to disk
     overlap_length = 64  # position within chunk to start overlap
@@ -1789,7 +1816,8 @@ class DocumentProcessor:
         self.special_strings = special_strings
         self.textnode_tagname = self.model.textnode_tagname()
         self.table_name_attrib_name = self.model.table_name_attrib_name()
-        self.EMPTY_STRING = self.EMPTY_STRING.encode(app.ENCODING).decode(app.ENCODING) # ensure empty string has the correct encoding
+        self.document_encoding = self.app.document_encoding
+        self.EMPTY_STRING = self.EMPTY_STRING.encode(self.document_encoding).decode(self.document_encoding) # ensure empty string has the correct encoding
         self.max_buffer = self.app.max_buffer
         self.cell_address_regex = re.compile("([A-Z]+)([0-9]+)")
         #                                      letter  number
@@ -1941,11 +1969,11 @@ class DocumentProcessor:
         row_dom = sheet_dom.createElement("row")
         sheet_dom.appendChild(row_dom)
         row_dom.setAttributeNode(sheet_dom.createAttribute('r'))
-        row_dom.setAttribute('r', self.app.to_unicode(row_num))
+        row_dom.setAttribute('r', self.app.to_document_unicode(row_num))
         cell_dom = sheet_dom.createElement("c")
         row_dom.appendChild(cell_dom)
         cell_dom.setAttributeNode(sheet_dom.createAttribute('r'))
-        cell_dom.setAttribute('r', u'A'+self.app.to_unicode(row_num))
+        cell_dom.setAttribute('r', u'A'+self.app.to_document_unicode(row_num))
         return self.convert_from_dom(row_dom)
 
     def row_process(self, row):
@@ -1976,7 +2004,7 @@ class DocumentProcessor:
     def convert_to_dom(self, string):
         string_with_namespace = u''.join([self.namespace_start, string, self.namespace_end])
         if sys.version_info[0] == 2:
-            return xml.dom.minidom.parseString(string_with_namespace.encode(self.app.ENCODING))
+            return xml.dom.minidom.parseString(string_with_namespace.encode(self.document_encoding))
         else:
             return xml.dom.minidom.parseString(string_with_namespace)
 
@@ -2046,15 +2074,19 @@ class DocumentProcessor:
 
     def template_row_process(self, row):
         # target row - use this as a template and inject each data row, replicating the template
+        sys.stderr.write("found insert row "+str(self.csv_data.num_rows)+"\n")###
         row_dom = self.convert_to_dom(row)
         self.csv_merge_processor.set_template(row_dom)
         if self.csv_data.num_rows > 0:
+            #sys.stderr.write("begin\n")###
+            #import pdb; pdb.set_trace()###
             for data_row in self.csv_data:   ## primary template row replication loop ##
                 self.position.next_data_row()
                 row_dom = self.csv_merge_processor.merge_row(data_row)
                 if app.verbose and self.csv_data.row_index() % 5 == 4:
-                    sys.stderr.write(u"csv2odf: processing row " + self.app.to_unicode(self.csv_data.row_index() + 1) + u"\r")
+                    sys.stderr.write(u"csv2odf: processing row " + self.app.to_input_unicode(self.csv_data.row_index() + 1) + u"\r")
                 row = self.convert_from_dom(row_dom)
+                #sys.stderr.write(row+"\n")###
                 self.write_output(row)
         else:
             row_dom = self.csv_merge_processor.null_row(self.csv_data.row_index())
@@ -2062,7 +2094,7 @@ class DocumentProcessor:
             row = self.convert_from_dom(row_dom)
             self.write_output(row)
         if app.verbose:
-            sys.stderr.write(u"csv2odf: processed " + self.app.to_unicode(self.csv_data.num_rows_used()) + u" rows\r\n")
+            sys.stderr.write(u"csv2odf: processed " + self.app.to_input_unicode(self.csv_data.num_rows_used()) + u" rows\r\n")
 
     def write_output(self, data):
         self.out_file.write(data)
@@ -2175,7 +2207,7 @@ class SharedStringFile:
         self.num_found_cells += 1
         self.inserted += 1
         if self.debug:
-            sys.stderr.write(u"string "+self.app.to_unicode(self.num_found_cells-1)+u": "+string+u"\n")
+            sys.stderr.write(u"string "+self.app.to_input_unicode(self.num_found_cells-1)+u": "+string+u"\n")
         self.write_intermediate(u''.join([self.STRING_START, cgi.escape(string), self.STRING_END]))
         return self.num_found_cells-1
 
@@ -2191,14 +2223,14 @@ class SharedStringFile:
         count_regex = re.compile(count_regex_string)
         match = count_regex.search(chunk)
         count = int(match.group(2))
-        chunk = count_regex.sub(u''.join([match.group(1), self.app.to_unicode(count + self.inserted), match.group(3)]), chunk)
+        chunk = count_regex.sub(u''.join([match.group(1), self.app.to_document_unicode(count + self.inserted), match.group(3)]), chunk)
         count_regex_string = r'(<sst[^>]*uniqueCount=[\"\'])([0-9]+)([\"\'][^>]*>)'
         #                     (<sst  *  uniqueCount=      )(number)(     *     >)
         #                            group 1                group 2    group 3
         unique_count_regex = re.compile(count_regex_string)
         match = unique_count_regex.search(chunk)
         unique_count = int(match.group(2))
-        chunk = unique_count_regex.sub(u''.join([match.group(1), self.app.to_unicode(unique_count + self.inserted),
+        chunk = unique_count_regex.sub(u''.join([match.group(1), self.app.to_document_unicode(unique_count + self.inserted),
                                                 match.group(3)]), chunk)
         self.out_file.write(chunk)  #write the first chunk to out_file
         #read remaining data from intermediate_file and write out
@@ -2283,6 +2315,7 @@ class TemporaryFile:
     size_limit = 20E6
     chunk_size = 0x10000
 
+
     def __init__(self, app, max_size=None, mode='w+b'):
         self.app = app
         self.mode = mode
@@ -2307,13 +2340,19 @@ class TemporaryFile:
       success = False
       tries = 0
       if self.is_in_ram:
-        raw_chunk = self.ram_file.read(number_of_bytes)
+        if number_of_bytes:
+          raw_chunk = self.ram_file.read(number_of_bytes)
+        else:
+          raw_chunk = self.ram_file.read()
       else:
-        raw_chunk = self.disk_file.read(number_of_bytes)
+        if number_of_bytes:
+          raw_chunk = self.disk_file.read(number_of_bytes)
+        else:
+          raw_chunk = self.disk_file.read()
       if len(raw_chunk) > 0:
         while not success:
           try:
-            new_chunk = raw_chunk.decode(self.app.ENCODING)
+            new_chunk = raw_chunk.decode(self.app.document_encoding)
             success = True
           except UnicodeDecodeError:
             tries += 1
@@ -2336,14 +2375,11 @@ class TemporaryFile:
 
     def __next__(self):
         if self.is_in_ram:
-            if self.mode == 'w':
-                line = self.ram_file.readline()
-                if line:
-                    return line
-                else:
-                    raise StopIteration
+            line = self.ram_file.readline()
+            if line:
+                return line
             else:
-                return self.ram_file.__next__()
+                raise StopIteration
         else:
             return self.disk_file.__next__()
 
@@ -2353,16 +2389,16 @@ class TemporaryFile:
                 if isinstance(data, self.app.text_type()):  # data is unicode
                     self.ram_file.write(data)
                 else:  # data is binary
-                    self.ram_file.write(data.decode(self.app.ENCODING))
+                    self.ram_file.write(data.decode(self.app.document_encoding))
             else:  # write binary
                 if isinstance(data, self.app.text_type()):  # data is unicode
-                    self.ram_file.write(data.encode(self.app.ENCODING))
+                    self.ram_file.write(data.encode(self.app.document_encoding))
                 else:  # data is binary
                     self.ram_file.write(data)
             if self.ram_file.tell() > self.size_limit:
                 self.rollover()
         else:
-            self.disk_file.write(data.encode(self.app.ENCODING))
+            self.disk_file.write(data.encode(self.app.document_encoding))
 
     def seek(self, position, start_point=0):
         if self.is_in_ram:
@@ -2435,7 +2471,7 @@ class DocumentArchive:
 
     #properties
     app = None
-    output_encoding = None
+    document_encoding = u"UTF-8"   # documents are utf-8 internally
     type = 'zip'
     in_package_name = None
     in_package_file = None
@@ -2448,11 +2484,10 @@ class DocumentArchive:
     def __init__(self, app, model):
         self.app = app
         if self.app.doctype == 'xlsx':
-            self.target_filename_pattern = model.target_filename_regex().replace(u"[0-9]", self.app.to_unicode(app.table))
+            self.target_filename_pattern = model.target_filename_regex().replace(u"[0-9]", self.app.to_document_unicode(app.table))
         else:
             self.target_filename_pattern = model.target_filename_regex()
         self.max_buffer = self.app.max_buffer
-        self.output_encoding = sys.getfilesystemencoding()
 
     def open(self, in_package_name):
         '''open in file and out file.  If in file is stdin, load it into a temporary file.
@@ -2495,7 +2530,7 @@ class DocumentArchive:
                 if match:
                     if inner_filename not in self.fileobject_list:  # this is a new request, else ignore
                         self.fileobject_list[inner_filename] = TemporaryFile(self.app, max_size=self.max_buffer)
-                        self.fileobject_list[inner_filename].write(self.in_package_file.read(inner_filename).decode(self.app.ENCODING))
+                        self.fileobject_list[inner_filename].write(self.in_package_file.read(inner_filename).decode(self.document_encoding))
                         self.fileobject_list[inner_filename].seek(0)
                         if re.match(self.target_filename_pattern, inner_filename):
                             self.target_filename = inner_filename
@@ -2636,10 +2671,10 @@ class DocumentArchive:
             if in_file.__class__.__name__ == 'TemporaryFile':
                 out_file.write(in_file.read())
             else:
-                out_file.write(in_file.read().decode(self.output_encoding))
+                out_file.write(in_file.read().decode(self.document_encoding))
         else:
             if isinstance(out_file, io.TextIOWrapper):
-                out_file.write(in_file.read().decode(self.output_encoding))
+                out_file.write(in_file.read().decode(self.document_encoding))
             else:
                 out_file.write(in_file.read())
 
@@ -2649,6 +2684,29 @@ class DocumentArchive:
             self.fileobject_list[name].close()
 
     # end class DocumentArchive
+
+
+class UTF8Recoder:
+    """
+    Iterator that reads an encoded stream and reencodes the input to UTF-8
+    From https://docs.python.org/2/library/csv.html
+    """
+    
+    def __init__(self, f, encoding):
+        import codecs
+        self.f = f
+        self.reader = codecs.getreader(encoding)(f)
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.reader.next().encode("utf-8")
+    
+    def seek(self, position):
+        self.f.seek(position)
+
+    # end class UTF8Recoder
 
 
 class IncomingDataSource:
@@ -2682,19 +2740,22 @@ class IncomingDataSource:
             if sys.stdin.isatty():
                 self.app.stop("Error: there was no csv file specified.", 1)
             else:
-                self.inputfile = TemporaryFile(self.app, self.max_buffer, 'w')  # inputfile needs to be seekable, so load stdin to a tempfile
                 if sys.version_info[0] == 2:
-                    self.inputfile.write(sys.stdin.read().decode(self.app.ENCODING))
+                    self.inputfile = TemporaryFile(self.app, self.max_buffer, 'w+b')  # inputfile needs to be seekable, so load stdin to a tempfile
+                    self.inputfile.write(sys.stdin.read())  # in python 2, csv.reader required the input to be in binary mode
                 else:
-                    self.inputfile.write(sys.stdin.buffer.read().decode(self.app.ENCODING))
+                    self.inputfile = TemporaryFile(self.app, self.max_buffer, 'w')  # inputfile needs to be seekable, so load stdin to a tempfile
+                    self.inputfile.write(sys.stdin.buffer.read().decode(self.app.csv_encoding))
                 self.inputfile.seek(0)
         else:
             if sys.version_info[0] == 2:
-                self.inputfile = open(filename,'rb')
+                f = open(filename,'rb')
+                self.inputfile = UTF8Recoder(f, self.app.csv_encoding)
+                self.app.csv_encoding = "UTF-8"
             else:
-                self.inputfile = open(filename, 'r', newline='', encoding=self.app.ENCODING)
+                self.inputfile = open(filename, 'r', newline='', encoding=self.app.csv_encoding)
         if sys.version_info[0] == 2:
-            self.reader = csv.reader(self.inputfile, delimiter=self.app.delimiter.encode(self.app.ENCODING))
+            self.reader = csv.reader(self.inputfile, delimiter=self.app.delimiter.encode("UTF-8"))
         else:
             self.reader = csv.reader(self.inputfile, delimiter=self.app.delimiter)
         self.profile()
@@ -2750,7 +2811,7 @@ class IncomingDataSource:
             self.data_row_index += 1
         data = []
         for item in data_in:
-            data.append(item.decode(self.app.ENCODING))
+            data.append(item.decode(self.app.csv_encoding))
         return data
 
     def __next__(self):
@@ -2806,7 +2867,6 @@ if __name__ == "__main__":
                     position.set_in_target_file(app.doctype == 'html'
                                                 or re.match(zip.target_filename_pattern, filename) is not None)
                     replacement = document_processor.scan(zip.inner_file_object(filename), filename)
-                    
                     zip.replace_file_object(filename, replacement)
             zip.save(app.out_filename)
     except:

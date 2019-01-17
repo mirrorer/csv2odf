@@ -86,6 +86,16 @@ OPTIONS FOR PROCESSING CSV DATA FILE
               cells  with  the text [csv2odf-date] (csv2odf-date inside square
               brackets).
 
+       -E <encoding>, --csv-encoding=<encoding>
+              specify the encoding used in the csv file.  A list of  available
+              encoding        names        can        be        found       at
+              https://docs.python.org/3/library/codecs.html#standard-encod-
+              ings.
+
+       --default-csv-encoding
+              display  the default encoding for csv files.  This value is sys-
+              tem dependent.
+
 OPTIONS FOR PROCESSING TEMPLATE FILE
        -H     insert the first csv row into the header
 

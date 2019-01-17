@@ -40,6 +40,12 @@ end reading at the nth row of the csv file
 .TP
 \fB\-d\fR <\fIfmt\fR>
 date format within csv data is specified by \fIfmt\fR string, see \-D for codes.  For columns identified as dates, the program will attempt to translate incoming data into the native date coding using the format supplied with the \-d option.  If the translation fails, it data will be inserted as text.  In ods files, the program knows which columns are dates by looking for date formatted cells in the template.  In xlsx files you must mark date cells with the text [csv2odf-date] (csv2odf-date inside square brackets).
+.TP
+\fB\-E\fR <\fIencoding\fR>, \fB\--csv-encoding=\fR<\fIencoding\fR>
+specify the encoding used in the csv file.  A list of available encoding names can be found at https://docs.python.org/3/library/codecs.html#standard-encodings.
+.TP
+\fB\--default-csv-encoding\fR
+display the default encoding for csv files.  This value is system dependent.
 .SH "OPTIONS FOR PROCESSING TEMPLATE FILE"
 .TP
 \fB\-H\fR

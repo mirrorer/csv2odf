@@ -1,0 +1,5 @@
+1,2.5,"04/29/2009 12:42",Date with time
+2,3.1415926535897932384,"04/29/1929 00:00",Pi to 19 decimal places
+"3","12.1","04/29/2009 13:42","Quoted Data, commas okay"
+4,-1333352264.1,"02/12/1962 01:01",10 digit floating point negative number
+5,5.5,04/29/2109 01:05,The End

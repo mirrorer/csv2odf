@@ -92,109 +92,119 @@ translation fails, it data will be inserted as text.  In ods files, the
 program knows which columns are dates by looking for date formatted cells
 in the template.  In xlsx files you must mark date cells with the text [csv2odf-date]
 (csv2odf-date inside square brackets). </dd>
+
+<dt><b>-E</b> &lt;<i>encoding</i>&gt;, <b>--csv-encoding=</b>&lt;<i>encoding</i>&gt; </dt>
+<dd>specify
+the encoding used in the csv file.  A list of available encoding names can
+be found at <a href='https://docs.python.org/3/library/codecs.html#standard-encodings.'>https://docs.python.org/3/library/codecs.html#standard-encodings.</a>
+
+</dd>
+
+<dt><b>--default-csv-encoding</b> </dt>
+<dd>display the default encoding for csv files.  This value
+is system dependent. </dd>
 </dl>
 
 <h2><a name='sect4' href='#toc4'>Options for Processing Template File</a></h2>
 
 <dl>
 
-<dt><b>-H</b>
-</dt>
-<dd>insert the first csv row into the header </dd>
+<dt><b>-H</b> </dt>
+<dd>insert the first
+csv row into the header </dd>
 
 <dt><b>-S</b> &lt;<i>n</i>&gt; </dt>
-<dd>skip the first n rows of the
-template file, the header will be the next row after those skipped </dd>
+<dd>skip the first n rows of the template file,
+the header will be the next row after those skipped </dd>
 
-<dt><b>-t</b> &lt;<i>n</i>&gt;
-</dt>
-<dd>specify which tab or table to add data to, default first table.  For html
-files, -t may be followed by a name to match to table id property. </dd>
+<dt><b>-t</b> &lt;<i>n</i>&gt; </dt>
+<dd>specify which tab
+or table to add data to, default first table.  For html files, -t may be
+followed by a name to match to table id property. </dd>
 
 <dt><b>-a</b> </dt>
-<dd>append
-csv data to the end of existing data </dd>
+<dd>append csv data to the
+end of existing data </dd>
 
 <dt><b>--comment=</b>&lt;text&gt; </dt>
-<dd>replace [csv2odf-comment]
-within the document with &lt;text&gt; </dd>
+<dd>replace [csv2odf-comment] within the document
+with &lt;text&gt; </dd>
 
 <dt><b>--div</b> </dt>
-<dd>search for &lt;div&gt; tags instead of &lt;table&gt;
-(html files only).  &lt;div&gt; tags must be nested with levels for table, row,
-and cell. </dd>
+<dd>search for &lt;div&gt; tags instead of &lt;table&gt; (html files only).  &lt;div&gt;
+tags must be nested with levels for table, row, and cell. </dd>
 
-<dt><b>--template-stdin-ods</b> </dt>
-<dd>The template will be passed to std-in and it&rsquo;s
-format will be ods </dd>
+<dt><b>--template-stdin-ods</b>
+</dt>
+<dd>The template will be passed to std-in and it&rsquo;s format will be ods </dd>
 
-<dt><b>--template-stdin-odt</b> </dt>
-<dd>The template will be passed to std-in
-and it&rsquo;s format will be odt </dd>
+<dt><b>--template-stdin-odt</b>
+</dt>
+<dd>The template will be passed to std-in and it&rsquo;s format will be odt </dd>
 
-<dt><b>--template-stdin-html</b> </dt>
-<dd>The template will be passed
-to std-in and it&rsquo;s format will be html </dd>
+<dt><b>--template-stdin-html</b>
+</dt>
+<dd>The template will be passed to std-in and it&rsquo;s format will be html </dd>
 
-<dt><b>--template-stdin-xlsx</b> </dt>
-<dd>The template will
-be passed to std-in and it&rsquo;s format will be xlsx </dd>
+<dt><b>--template-stdin-xlsx</b>
+</dt>
+<dd>The template will be passed to std-in and it&rsquo;s format will be xlsx </dd>
 
-<dt><b>--template-stdin-docx</b> </dt>
-<dd>The template
-will be passed to std-in and it&rsquo;s format will be docx </dd>
+<dt><b>--template-stdin-docx</b>
+</dt>
+<dd>The template will be passed to std-in and it&rsquo;s format will be docx </dd>
 </dl>
 
-<h2><a name='sect5' href='#toc5'>General Options</a></h2>
+<h2><a name='sect5' href='#toc5'>General
+Options</a></h2>
 
 <dl>
 
 <dt><b>-h</b> </dt>
-<dd>displays
-help information </dd>
+<dd>displays help information </dd>
 
 <dt><b>-v</b> </dt>
 <dd>verbose mode </dd>
 
 <dt><b>-D</b> </dt>
-<dd>show a list of date format codes (see
-below) </dd>
+<dd>show a list of date
+format codes (see below) </dd>
 
 <dt><b>-q</b> </dt>
 <dd>suppress all warning messages </dd>
 
 <dt><b>-x</b> </dt>
-<dd>create an xml output file instead
-of odf </dd>
+<dd>create an xml
+output file instead of odf </dd>
 
 <dt><b>-n</b> </dt>
-<dd>do not merge the data into output, use with -x to extract template
-xml codes </dd>
+<dd>do not merge the data into output, use with
+-x to extract template xml codes </dd>
 
 <dt><b>--input=</b>&lt;<i>file</i>&gt; </dt>
-<dd>specify the csv data file location </dd>
+<dd>specify the csv data file location
+</dd>
 
 <dt><b>--template=</b>&lt;<i>file</i>&gt; </dt>
-<dd>specify
-the tempate file location </dd>
+<dd>specify the tempate file location </dd>
 
 <dt><b>--output=</b>&lt;<i>file</i>&gt; </dt>
-<dd>specify the output file location
-</dd>
+<dd>specify the
+output file location </dd>
 
 <dt><b>-V</b> </dt>
 <dd>display version number </dd>
 
 <dt><b>-z</b> </dt>
-<dd>display debugging information </dd>
+<dd>display debugging information
+</dd>
 </dl>
 
 <h2><a name='sect6' href='#toc6'>Date Format Codes</a></h2>
 <p>
-The
-date format codes are the same ones used by Python&rsquo;s <i>strftime</i> function. <p>
-%a
-  Locale&rsquo;s abbreviated weekday name. <br>
+The date format codes are the same ones used by Python&rsquo;s
+<i>strftime</i> function. <p>
+%a   Locale&rsquo;s abbreviated weekday name. <br>
 %A   Locale&rsquo;s full weekday name. <br>
 %b   Locale&rsquo;s abbreviated month name. <br>
 %B   Locale&rsquo;s full month name. <br>
